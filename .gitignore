@@ -1,0 +1,7 @@
+target/
+.classpath
+*.class
+.settings/
+.project
+.lein-failures
+.lein-repl-history
