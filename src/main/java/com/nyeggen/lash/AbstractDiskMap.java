@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.nyeggen.lash.bucket.WritethruRecord;
@@ -26,8 +27,8 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Enforces exclusive access to the secondary in the event of a reallocation.*/
 	final ReentrantReadWriteLock secondaryLock = new ReentrantReadWriteLock();
 	
-	final ReentrantReadWriteLock[] locks = new ReentrantReadWriteLock[nLocks];
-	{ for(int i=0;i<nLocks;i++) locks[i] = new ReentrantReadWriteLock(); }
+	final ReentrantLock[] locks = new ReentrantLock[nLocks];
+	{ for(int i=0;i<nLocks;i++) locks[i] = new ReentrantLock(); }
 	
 	/**Number of records inserted.*/
 	final AtomicLong size = new AtomicLong(0);
@@ -70,24 +71,20 @@ public abstract class AbstractDiskMap implements Closeable {
 	protected abstract void writeHeader();
 	
 	protected Lock readLockForHash(long hash){
-		return locks[(int)(hash & (nLocks - 1))].readLock();
+		return locks[(int)(hash & (nLocks - 1))];
 	}
 	protected Lock writeLockForHash(long hash){
-		return locks[(int)(hash & (nLocks - 1))].writeLock();		
+		return locks[(int)(hash & (nLocks - 1))];	
 	}
 	
+	//This doesn't lock - because it depends on tableLength, callers should
+	//establish some lock that precludes a full rehash (read or write lock on
+	//any of the locks).
 	protected long idxForHash(long hash){
-		//This read lock is to coordinate with the linear hashing updaters
-		readLockForHash(hash).lock();
-		try {
-			final long h0 = hash & (tableLength - 1);
-			if(rehashCompleteIdx.get() >= h0)
-				return hash & (tableLength + tableLength - 1);
-			else return h0;
-		}
-		finally {
-			readLockForHash(hash).unlock();
-		}
+		final long h0 = hash & (tableLength - 1);
+		if(rehashCompleteIdx.get() >= h0)
+			return hash & (tableLength + tableLength - 1);
+		else return h0;
 	}
 	
 	/**Perform incremental rehashing to keep the load under the threshold.*/
@@ -97,7 +94,7 @@ public abstract class AbstractDiskMap implements Closeable {
 			//the counters.  All the actual rehashing has been done, though.
 			if(rehashCompleteIdx.compareAndSet(tableLength-1, tableLength)){
 				//Global lock, since everything depends on tableLength.
-				for(int i=0;i<nLocks; i++) locks[i].writeLock().lock();
+				for(int i=0;i<nLocks; i++) locks[i].lock();
 				try {
 					primaryMapper.doubleLength();
 					//Processing counter is always >= complete counter, so we can reset both here
@@ -107,7 +104,7 @@ public abstract class AbstractDiskMap implements Closeable {
 				} catch(Exception e){
 					throw new RuntimeException(e);
 				} finally {
-					for(int i=nLocks-1; i>=0; i--) locks[i].writeLock().unlock();
+					for(int i=nLocks-1; i>=0; i--) locks[i].unlock();
 				}
 				return;
 			}

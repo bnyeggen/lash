@@ -66,10 +66,10 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	@Override
 	public byte[] get(byte[] k){
 		final long hash = Hash.murmurHash(k);
-		final long idx = idxForHash(hash);
-		final long pos = idxToPos(idx);
-		readLockForHash(idx).lock();
+		readLockForHash(hash).lock();
 		try {
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
 			
@@ -82,7 +82,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				} else return null;
 			}
 		} finally {
-			readLockForHash(idx).unlock();
+			readLockForHash(hash).unlock();
 		}
 	}
 	
@@ -91,12 +91,12 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		if(load() > loadRehashThreshold) rehash();
 
 		final long hash = Hash.murmurHash(k);
-		final long idx = idxForHash(hash);
-		final long pos = idxToPos(idx);
 		final Record toWriteBucket = new Record(hash, k, v);
 
-		writeLockForHash(idx).lock();
+		writeLockForHash(hash).lock();
 		try {
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0){
 				final long insertPos = allocateForRecord(toWriteBucket);
@@ -118,7 +118,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				}
 			}			
 		} finally {
-			writeLockForHash(idx).unlock();
+			writeLockForHash(hash).unlock();
 		}
 	}
 	
@@ -127,14 +127,14 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		if(load() > loadRehashThreshold) rehash();
 		
 		final long hash = Hash.murmurHash(k);
-		final long idx = idxForHash(hash);
-		final long pos = idxToPos(idx);
 		final Record toWriteBucket = new Record(hash, k, v);
+		//We'll be inserting somewhere
+		final long insertPos = allocateForRecord(toWriteBucket);
 		
-		writeLockForHash(idx).lock();
+		writeLockForHash(hash).lock();
 		try {
-			//We'll be inserting somewhere
-			final long insertPos = allocateForRecord(toWriteBucket);
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
 			
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) {
@@ -168,18 +168,18 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				}
 			}			
 		} finally {
-			writeLockForHash(idx).unlock();
+			writeLockForHash(hash).unlock();
 		}
 	}
 	
 	@Override
 	public byte[] remove(byte[] k){
 		final long hash = Hash.murmurHash(k);
-		final long idx = idxForHash(hash);
-		final long pos = idxToPos(idx);
 
-		writeLockForHash(idx).lock();
+		writeLockForHash(hash).lock();
 		try {
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
 			
@@ -199,7 +199,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				else return null;
 			}			
 		} finally {
-			writeLockForHash(idx).unlock();
+			writeLockForHash(hash).unlock();
 		}
 	}
 	
