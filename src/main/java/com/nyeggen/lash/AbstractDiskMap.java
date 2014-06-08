@@ -130,7 +130,7 @@ public abstract class AbstractDiskMap implements Closeable {
 				rehashIdx(i);
 				//Now, to ensure we have a contiguous range of complete tickets, we
 				//only add it back to the complete set if we can find the prior ticket.
-				while(!rehashCompleteIdx.compareAndSet(i-1, i)) Thread.yield();
+				while(!rehashCompleteIdx.compareAndSet(i-1, i));
 			} finally {
 				lockForHash(i).writeLock().unlock();
 			}
