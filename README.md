@@ -14,7 +14,12 @@ See Implementation.md, and of course the source, for implementation details.
 
 ROADMAP:
 
-- Convert tests from Clojure to JUnit & publish them
 - Support for fixed-length records and fixed-key, variable-value records
 - Serialization wrappers for using Java objects as keys and values
 - API for record -> record pointers to support multiple indexes over a primary map
+- Make more configurable w/ a factory, specifically for:
+  - Lock striping
+  - Read/write vs. mutex locks
+  - Load targets
+  - Concurrent linear hashing vs. blocking and rehashing in multiple dedicated threads
+- Write caching improvements
