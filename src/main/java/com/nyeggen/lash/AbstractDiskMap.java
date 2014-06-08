@@ -4,7 +4,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.nyeggen.lash.bucket.WritethruRecord;
@@ -69,14 +69,16 @@ public abstract class AbstractDiskMap implements Closeable {
 	 * Typically called via close() method.*/
 	protected abstract void writeHeader();
 	
-	/**Returns the lock corresponding to the given hash or bucket index (they
-	 * produce the same answer as long as we have nBuckets > nLocks).*/
-	protected ReadWriteLock lockForHash(long hash){
-		return locks[(int)(hash & (nLocks - 1))];
+	protected Lock readLockForHash(long hash){
+		return locks[(int)(hash & (nLocks - 1))].readLock();
 	}
+	protected Lock writeLockForHash(long hash){
+		return locks[(int)(hash & (nLocks - 1))].writeLock();		
+	}
+	
 	protected long idxForHash(long hash){
 		//This read lock is to coordinate with the linear hashing updaters
-		lockForHash(hash).readLock().lock();
+		readLockForHash(hash).lock();
 		try {
 			final long h0 = hash & (tableLength - 1);
 			if(rehashCompleteIdx.get() >= h0)
@@ -84,7 +86,7 @@ public abstract class AbstractDiskMap implements Closeable {
 			else return h0;
 		}
 		finally {
-			lockForHash(hash).readLock().unlock();
+			readLockForHash(hash).unlock();
 		}
 	}
 	
@@ -125,14 +127,14 @@ public abstract class AbstractDiskMap implements Closeable {
 				}
 			}
 			//We now have a valid ticket - we rehash the corresponding index
-			lockForHash(i).writeLock().lock();
+			writeLockForHash(i).lock();
 			try {
 				rehashIdx(i);
 				//Now, to ensure we have a contiguous range of complete tickets, we
 				//only add it back to the complete set if we can find the prior ticket.
 				while(!rehashCompleteIdx.compareAndSet(i-1, i));
 			} finally {
-				lockForHash(i).writeLock().unlock();
+				writeLockForHash(i).unlock();
 			}
 		}		
 	}

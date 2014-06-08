@@ -68,7 +68,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		final long hash = Hash.murmurHash(k);
 		final long idx = idxForHash(hash);
 		final long pos = idxToPos(idx);
-		lockForHash(idx).readLock().lock();
+		readLockForHash(idx).lock();
 		try {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
@@ -82,7 +82,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				} else return null;
 			}
 		} finally {
-			lockForHash(idx).readLock().unlock();
+			readLockForHash(idx).unlock();
 		}
 	}
 	
@@ -95,7 +95,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		final long pos = idxToPos(idx);
 		final Record toWriteBucket = new Record(hash, k, v);
 
-		lockForHash(idx).writeLock().lock();
+		writeLockForHash(idx).lock();
 		try {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0){
@@ -118,7 +118,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				}
 			}			
 		} finally {
-			lockForHash(idx).writeLock().unlock();
+			writeLockForHash(idx).unlock();
 		}
 	}
 	
@@ -131,7 +131,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		final long pos = idxToPos(idx);
 		final Record toWriteBucket = new Record(hash, k, v);
 		
-		lockForHash(idx).writeLock().lock();
+		writeLockForHash(idx).lock();
 		try {
 			//We'll be inserting somewhere
 			final long insertPos = allocateForRecord(toWriteBucket);
@@ -168,7 +168,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				}
 			}			
 		} finally {
-			lockForHash(idx).writeLock().unlock();
+			writeLockForHash(idx).unlock();
 		}
 	}
 	
@@ -178,7 +178,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		final long idx = idxForHash(hash);
 		final long pos = idxToPos(idx);
 
-		lockForHash(idx).writeLock().lock();
+		writeLockForHash(idx).lock();
 		try {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
@@ -199,7 +199,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 				else return null;
 			}			
 		} finally {
-			lockForHash(idx).writeLock().unlock();
+			writeLockForHash(idx).unlock();
 		}
 	}
 	
@@ -245,7 +245,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	public void processAllRecords(RecordProcessor proc){
 		for(long idx = 0; idx < tableLength; idx++){
 			final long pos = idxToPos(idx);
-			lockForHash(idx).readLock().lock();
+			readLockForHash(idx).lock();
 			try {
 				final long adr = primaryMapper.getLong(pos);
 				if(adr == 0) continue;
@@ -257,7 +257,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 					} else break;
 				}
 			} finally {
-				lockForHash(idx).readLock().unlock();
+				readLockForHash(idx).unlock();
 			}
 		}
 	}
