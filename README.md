@@ -6,16 +6,15 @@ lash is a disk-backed hashmap for Java.  It prioritizes:
 
 This is a hashmap, not a full-on durable database.  Journaling will not be implemented, which means that if your machine loses power it is highly likely your map will be corrupted.  However, if you are able to successfully close() your hashmap, you will be able to reload the map.
 
-The underlying hash table specifications are: 64-bit murmurhash2 over key bytes for hash codes, power-of-two hash table size, collision resolution via chaining, rehashing in-place.  Records are byte blobs; the entire key is checked for bytewise equality with prospective keys (ie, no fancy equality functions as of yet).
-
 For performance reasons, lash uses native byte order for storage of metadata like record lengths and hash values.  This means that if you plan on shipping lash maps across machines, you should verify they have the same native byte order.  This is a work in progress; there are no guarantees about format compatibility between release versions, or within the same snapshot version.
 
 lash uses mmap() heavily for storage access, which means that insertion performance is highly dependent on your system's tuning parameters (eg, sysctl's vm.dirty_background_ratio and vm.dirty_ratio).  It lurves RAM, but memory usage is managed by the operating system via the page cache and not the JVM.  For this reason it has excellent garbage collection performance and is nice for memory-constrained environments.  The random access inherent in hashmaps also means that you will be throwing a lot of random IOPs - SSDs are helpful.
 
+See Implementation.md, and of course the source, for implementation details.
+
 ROADMAP:
 
-- Support for variable-length records (DONE)
-- Convert from single-threaded rehashing to concurrent linear hashing
+- Convert tests from Clojure to JUnit & publish them
 - Support for fixed-length records and fixed-key, variable-value records
-- Serialization wrappers for using Java objects directly as keys and values
+- Serialization wrappers for using Java objects as keys and values
 - API for record -> record pointers to support multiple indexes over a primary map

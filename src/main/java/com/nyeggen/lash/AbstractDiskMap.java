@@ -12,10 +12,10 @@ import com.nyeggen.lash.util.MMapper;
 
 public abstract class AbstractDiskMap implements Closeable {
 	/**Number of lock stripes. Always a power of 2*/
-	static final int nLocks = 32;
+	static final int nLocks = 64;
 	/**We attempt to keep load below this value.*/
 	static final double loadRehashThreshold = 0.75;
-	//268,435,456; equivalent to 33,554,432 longs
+	//28 -> 268,435,456; equivalent to 33,554,432 longs
 	static final long defaultFileLength = 1L << 28;
 	
 	final MMapper primaryMapper, secondaryMapper;
@@ -33,7 +33,10 @@ public abstract class AbstractDiskMap implements Closeable {
 	final AtomicLong size = new AtomicLong(0);
 	/**Number of buckets in the table, always a power of 2.*/
 	long tableLength;
-
+	
+	final AtomicLong rehashCompleteIdx = new AtomicLong(-1);
+	final AtomicLong rehashProcessingIdx = new AtomicLong(0);
+	
 	public AbstractDiskMap(String baseFolderLoc){
 		try {
 			final File baseFolder = new File(baseFolderLoc);
@@ -50,7 +53,7 @@ public abstract class AbstractDiskMap implements Closeable {
 			primaryMapper = new MMapper(primaryLoc, primFileLen);
 			secondaryMapper = new MMapper(secondaryLoc, secFileLen);
 			readHeader();
-			
+			primaryMapper.doubleLength();
 		} catch (Exception e){
 			throw new RuntimeException(e);
 		}
@@ -71,6 +74,104 @@ public abstract class AbstractDiskMap implements Closeable {
 	protected ReadWriteLock lockForHash(long hash){
 		return locks[(int)(hash & (nLocks - 1))];
 	}
+	protected long idxForHash(long hash){
+		//This read lock is to coordinate with the linear hashing updaters
+		lockForHash(hash).readLock().lock();
+		try {
+			final long h0 = hash & (tableLength - 1);
+			if(rehashCompleteIdx.get() >= h0)
+				return hash & (tableLength + tableLength - 1);
+			else return h0;
+		}
+		finally {
+			lockForHash(hash).readLock().unlock();
+		}
+	}
+	
+	/**Perform incremental rehashing to keep the load under the threshold.*/
+	protected void rehash(){
+		while(load() > loadRehashThreshold) {
+			//If we've completed all rehashing, we need to expand the table & reset
+			//the counters.  All the actual rehashing has been done, though.
+			if(rehashCompleteIdx.compareAndSet(tableLength-1, tableLength)){
+				//Global lock, since everything depends on tableLength.
+				for(int i=0;i<nLocks; i++) locks[i].writeLock().lock();
+				try {
+					primaryMapper.doubleLength();
+					//Processing counter is always >= complete counter, so we can reset both here
+					rehashProcessingIdx.set(0);
+					rehashCompleteIdx.set(-1);
+					tableLength *= 2;
+				} catch(Exception e){
+					throw new RuntimeException(e);
+				} finally {
+					for(int i=nLocks-1; i>=0; i--) locks[i].writeLock().unlock();
+				}
+				return;
+			}
+			
+			//Otherwise, we attempt to grab the next index to process
+			long i;
+			while(true){
+				i = rehashProcessingIdx.getAndIncrement();
+				//If it's in the valid table range, we conceptually acquired a valid ticket
+				if(i < tableLength) break;
+				//Otherwise we're in the middle of a reset - spin until it has completed.
+				//TODO: Maybe do a wait() instead, depending on efficiency vs. spin
+				while(i >= tableLength) {
+					Thread.yield();
+					if(load() < loadRehashThreshold) return;
+					i = rehashProcessingIdx.get();
+				}
+			}
+			//We now have a valid ticket - we rehash the corresponding index
+			lockForHash(i).writeLock().lock();
+			try {
+				rehashIdx(i);
+				//Now, to ensure we have a contiguous range of complete tickets, we
+				//only add it back to the complete set if we can find the prior ticket.
+				while(!rehashCompleteIdx.compareAndSet(i-1, i)) Thread.yield();
+			} finally {
+				lockForHash(i).writeLock().unlock();
+			}
+		}		
+	}
+	
+	/**Allocates the given amount of space in secondary storage, and returns a
+	 * pointer to it.  Expands secondary storage if necessary.*/
+	protected long allocateSecondary(long size){
+		secondaryLock.readLock().lock();
+		try {
+			while(true){
+				final long out = secondaryWritePos.get();
+				final long newSecondaryPos = out + size;
+				if(newSecondaryPos >= secondaryMapper.size()){
+					//Goes to reallocation section
+					break;
+				} else {
+					if(secondaryWritePos.compareAndSet(out, newSecondaryPos)) return out;
+				}
+			}
+		} finally {
+			secondaryLock.readLock().unlock();
+		}
+		
+		secondaryLock.writeLock().lock();
+		try {
+			if(secondaryWritePos.get() + size >= secondaryMapper.size()) 
+				secondaryMapper.doubleLength();
+		} catch(Exception e){
+			throw new RuntimeException(e);
+		} finally {
+			secondaryLock.writeLock().unlock();
+		}
+		return allocateSecondary(size);
+	}
+	
+	/**Because all records in a bucket hash to their position or position + tableLength,
+	 * we can incrementally rehash one bucket at a time.
+	 * This does not need to acquire a lock; the calling rehash() method handles it.*/
+	protected abstract void rehashIdx(long idx);
 	
 	/**Writes all header metadata and unmaps the backing mmap'd files.*/
 	@Override
@@ -97,7 +198,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	
 	/**Average number of records per bucket. O(1).*/
 	public double load(){
-		return size.doubleValue() / tableLength;
+		return size.doubleValue() / (tableLength + rehashCompleteIdx.get() + 1);
 	}
 
 	/**Interface used in lieu of an iterator for record-processing.*/
@@ -109,8 +210,19 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Incrementally run the supplied RecordProcessor on each record.*/
 	public abstract void processAllRecords(RecordProcessor proc);
 	
+	/**Returns the byte offset the given bucket number lives at.*/
+	protected abstract long idxToPos(long idx);
+	/**Returns the value corresponding to the given key, or null if it is not
+	 * present.  Zero-width values (ie, a hash set) are supported.*/
 	public abstract byte[] get(byte[] k);
+	/**Inserts the given record in the map, and returns the previous value associated
+	 * with the given key, or null if there was none.*/
 	public abstract byte[] put(byte[] k, byte[] v);
+	/**Inserts the given record in the map, only if there was no previous value associated
+	 * with the key.  Returns null in the case of a successful insertion, or the value
+	 * previously (and currently) associated with the map.*/
 	public abstract byte[] putIfAbsent(byte[] k, byte[] v);
+	/**Remove the record associated with the given key, returning the previous value, or
+	 * null if there was none.*/
 	public abstract byte[] remove(byte[] k);
 }
