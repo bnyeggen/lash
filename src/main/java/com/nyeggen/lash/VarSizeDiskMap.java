@@ -13,8 +13,14 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	/* In this implementation, the primary mapper just stores long pointers
 	 * into the secondary mapper.*/
 	
-	public VarSizeDiskMap(String baseFolderLoc){
-		super(baseFolderLoc);
+	public VarSizeDiskMap(String baseFolderLoc, long primaryFileLen){
+		super(baseFolderLoc, nextPowerOf2(primaryFileLen));
+	}
+	
+	private static long nextPowerOf2(long i){
+		if(i < (1<<28)) return (1<<28);
+		if((i & (i-1))==0) return i;
+		return (1 << (64 - (Long.numberOfLeadingZeros(i))));
 	}
 	
 	protected void readHeader(){
@@ -83,6 +89,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		}
 	}
 	
+	//This is the primary use case for a r/w lock
 	@Override
 	public byte[] putIfAbsent(byte[] k, byte[] v){
 		if(load() > loadRehashThreshold) rehash();

@@ -36,7 +36,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	//Denotes the index of the next stripe to be rehashed
 	final AtomicLong rehashComplete = new AtomicLong(0);
 	
-	public AbstractDiskMap(String baseFolderLoc){
+	public AbstractDiskMap(String baseFolderLoc, long primaryFileLen){
 		try {
 			final File baseFolder = new File(baseFolderLoc);
 			baseFolder.mkdirs();
@@ -46,7 +46,7 @@ public abstract class AbstractDiskMap implements Closeable {
 			final String secondaryLoc = this.baseFolderLoc + File.separator + "secondary.hash";
 			final File primFile = new File(primaryLoc);
 			final File secFile = new File(secondaryLoc);
-			final long primFileLen = Math.max(defaultFileLength, primFile.length());
+			final long primFileLen = Math.max(primaryFileLen, primFile.length());
 			final long secFileLen = Math.max(defaultFileLength, secFile.length());
 			
 			primaryMapper = new MMapper(primaryLoc, primFileLen);

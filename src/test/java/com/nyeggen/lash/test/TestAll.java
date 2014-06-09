@@ -46,7 +46,7 @@ public class TestAll {
 	public void testConcurrentInserts() throws Exception {
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
-		final AbstractDiskMap dmap = new VarSizeDiskMap(dir);
+		final AbstractDiskMap dmap = new VarSizeDiskMap(dir, 0);
 		final AtomicLong ctr = new AtomicLong(0);
 		try {
 			final Thread t1 = new Thread(makeLongInserter(ctr, dmap, 0       , 7500000));
