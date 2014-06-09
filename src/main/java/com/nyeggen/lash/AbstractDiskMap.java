@@ -4,8 +4,6 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.nyeggen.lash.bucket.WritethruRecord;
@@ -13,7 +11,7 @@ import com.nyeggen.lash.util.MMapper;
 
 public abstract class AbstractDiskMap implements Closeable {
 	/**Number of lock stripes. Always a power of 2*/
-	static final int nLocks = 64;
+	static final int nLocks = 256;
 	/**We attempt to keep load below this value.*/
 	static final double loadRehashThreshold = 0.75;
 	//28 -> 268,435,456; equivalent to 33,554,432 longs
@@ -27,8 +25,8 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Enforces exclusive access to the secondary in the event of a reallocation.*/
 	final ReentrantReadWriteLock secondaryLock = new ReentrantReadWriteLock();
 	
-	final ReentrantLock[] locks = new ReentrantLock[nLocks];
-	{ for(int i=0;i<nLocks;i++) locks[i] = new ReentrantLock(); }
+	final Object[] locks = new Object[nLocks];
+	{ for(int i=0;i<nLocks;i++) locks[i] = new Object(); }
 	
 	/**Number of records inserted.*/
 	final AtomicLong size = new AtomicLong(0);
@@ -70,10 +68,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	 * Typically called via close() method.*/
 	protected abstract void writeHeader();
 	
-	protected Lock readLockForHash(long hash){
-		return locks[(int)(hash & (nLocks - 1))];
-	}
-	protected Lock writeLockForHash(long hash){
+	protected Object lockForHash(long hash){
 		return locks[(int)(hash & (nLocks - 1))];	
 	}
 	
@@ -87,25 +82,32 @@ public abstract class AbstractDiskMap implements Closeable {
 		else return h0;
 	}
 	
+	//Recursively locks all available locks
+	protected void completeExpansion(int idx){
+		if(idx == nLocks){
+			try {
+				primaryMapper.doubleLength();
+				//Processing counter is always >= complete counter, so we can reset both here
+				rehashProcessingIdx.set(0);
+				rehashCompleteIdx.set(-1);
+				tableLength *= 2;
+			} catch(Exception e){
+				throw new RuntimeException(e);
+			}
+		} else {
+			synchronized(locks[idx]){
+				completeExpansion(idx+1);
+			}
+		}
+	}
+	
 	/**Perform incremental rehashing to keep the load under the threshold.*/
 	protected void rehash(){
 		while(load() > loadRehashThreshold) {
 			//If we've completed all rehashing, we need to expand the table & reset
 			//the counters.  All the actual rehashing has been done, though.
 			if(rehashCompleteIdx.compareAndSet(tableLength-1, tableLength)){
-				//Global lock, since everything depends on tableLength.
-				for(int i=0;i<nLocks; i++) locks[i].lock();
-				try {
-					primaryMapper.doubleLength();
-					//Processing counter is always >= complete counter, so we can reset both here
-					rehashProcessingIdx.set(0);
-					rehashCompleteIdx.set(-1);
-					tableLength *= 2;
-				} catch(Exception e){
-					throw new RuntimeException(e);
-				} finally {
-					for(int i=nLocks-1; i>=0; i--) locks[i].unlock();
-				}
+				completeExpansion(0);
 				return;
 			}
 			
@@ -124,14 +126,12 @@ public abstract class AbstractDiskMap implements Closeable {
 				}
 			}
 			//We now have a valid ticket - we rehash the corresponding index
-			writeLockForHash(i).lock();
-			try {
+			synchronized(lockForHash(i)){
 				rehashIdx(i);
 				//Now, to ensure we have a contiguous range of complete tickets, we
 				//only add it back to the complete set if we can find the prior ticket.
+				//Benchmarking is difficult, but I believe this may be a hot loop.
 				while(!rehashCompleteIdx.compareAndSet(i-1, i));
-			} finally {
-				writeLockForHash(i).unlock();
 			}
 		}		
 	}
