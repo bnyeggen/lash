@@ -33,8 +33,8 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Number of buckets in the table, always a power of 2.*/
 	long tableLength;
 	
-	final AtomicLong rehashCompleteIdx = new AtomicLong(-1);
-	final AtomicLong rehashProcessingIdx = new AtomicLong(0);
+	//Denotes the index of the next stripe to be rehashed
+	final AtomicLong rehashComplete = new AtomicLong(0);
 	
 	public AbstractDiskMap(String baseFolderLoc){
 		try {
@@ -76,10 +76,9 @@ public abstract class AbstractDiskMap implements Closeable {
 	//establish some lock that precludes a full rehash (read or write lock on
 	//any of the locks).
 	protected long idxForHash(long hash){
-		final long h0 = hash & (tableLength - 1);
-		if(rehashCompleteIdx.get() >= h0)
-			return hash & (tableLength + tableLength - 1);
-		else return h0;
+		return (hash & (nLocks - 1)) < rehashComplete.get()
+				? hash & (tableLength + tableLength - 1) 
+				: hash & (tableLength - 1);
 	}
 	
 	//Recursively locks all available locks
@@ -87,9 +86,7 @@ public abstract class AbstractDiskMap implements Closeable {
 		if(idx == nLocks){
 			try {
 				primaryMapper.doubleLength();
-				//Processing counter is always >= complete counter, so we can reset both here
-				rehashProcessingIdx.set(0);
-				rehashCompleteIdx.set(-1);
+				rehashComplete.set(0);
 				tableLength *= 2;
 			} catch(Exception e){
 				throw new RuntimeException(e);
@@ -105,33 +102,29 @@ public abstract class AbstractDiskMap implements Closeable {
 	protected void rehash(){
 		while(load() > loadRehashThreshold) {
 			//If we've completed all rehashing, we need to expand the table & reset
-			//the counters.  All the actual rehashing has been done, though.
-			if(rehashCompleteIdx.compareAndSet(tableLength-1, tableLength)){
+			//the counters.
+			if(rehashComplete.compareAndSet(nLocks, nLocks+1)){
 				completeExpansion(0);
 				return;
 			}
 			
 			//Otherwise, we attempt to grab the next index to process
-			long i;
+			long stripeToRehash;
 			while(true){
-				i = rehashProcessingIdx.getAndIncrement();
+				stripeToRehash = rehashComplete.getAndIncrement();
 				//If it's in the valid table range, we conceptually acquired a valid ticket
-				if(i < tableLength) break;
+				if(stripeToRehash < nLocks) break;
 				//Otherwise we're in the middle of a reset - spin until it has completed.
-				//TODO: Maybe do a wait() instead, depending on efficiency vs. spin
-				while(i >= tableLength) {
+				while(rehashComplete.get() >= nLocks) {
 					Thread.yield();
 					if(load() < loadRehashThreshold) return;
-					i = rehashProcessingIdx.get();
 				}
 			}
-			//We now have a valid ticket - we rehash the corresponding index
-			synchronized(lockForHash(i)){
-				rehashIdx(i);
-				//Now, to ensure we have a contiguous range of complete tickets, we
-				//only add it back to the complete set if we can find the prior ticket.
-				//Benchmarking is difficult, but I believe this may be a hot loop.
-				while(!rehashCompleteIdx.compareAndSet(i-1, i));
+			//We now have a valid ticket - we rehash all the indexes in the given stripe
+			synchronized(lockForHash(stripeToRehash)){
+				for(long idx = stripeToRehash; idx < tableLength; idx+=nLocks){
+					rehashIdx(idx);
+				}
 			}
 		}		
 	}
@@ -197,7 +190,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	
 	/**Average number of records per bucket. O(1).*/
 	public double load(){
-		return size.doubleValue() / (tableLength + rehashCompleteIdx.get() + 1);
+		return size.doubleValue() / (tableLength + (tableLength/nLocks)*rehashComplete.get());
 	}
 
 	/**Interface used in lieu of an iterator for record-processing.*/
