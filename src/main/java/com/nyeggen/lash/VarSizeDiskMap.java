@@ -5,33 +5,41 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.nyeggen.lash.bucket.Record;
-import com.nyeggen.lash.bucket.WritethruRecord;
+import com.nyeggen.lash.bucket.VarSizeWritethruRecord;
 import com.nyeggen.lash.util.Hash;
 
 public class VarSizeDiskMap extends AbstractDiskMap {
 
 	/* In this implementation, the primary mapper just stores long pointers
 	 * into the secondary mapper.*/
-	
+		
+	public VarSizeDiskMap(String baseFolderLoc){
+		this(baseFolderLoc, 0);
+	}
 	public VarSizeDiskMap(String baseFolderLoc, long primaryFileLen){
 		super(baseFolderLoc, nextPowerOf2(primaryFileLen));
 	}
-	
+		
 	private static long nextPowerOf2(long i){
 		if(i < (1<<28)) return (1<<28);
 		if((i & (i-1))==0) return i;
 		return (1 << (64 - (Long.numberOfLeadingZeros(i))));
 	}
 	
+	@Override
+	protected long getHeaderSize() { return 32; }
+	
 	protected void readHeader(){
 		secondaryLock.readLock().lock();
 		try {
 			final long size = secondaryMapper.getLong(0),
 					   bucketsInMap = secondaryMapper.getLong(8),
-					   lastSecondaryPos = secondaryMapper.getLong(16);			
+					   lastSecondaryPos = secondaryMapper.getLong(16),
+					   rehashComplete = secondaryMapper.getLong(24);
 			this.size.set(size);
 			this.tableLength = bucketsInMap == 0 ? (primaryMapper.size() / 8) : bucketsInMap;
-			this.secondaryWritePos = new AtomicLong(lastSecondaryPos == 0 ? 24 : lastSecondaryPos);
+			this.secondaryWritePos.set(lastSecondaryPos == 0 ? getHeaderSize() : lastSecondaryPos);
+			this.rehashComplete.set(rehashComplete);
 		} finally {
 			secondaryLock.readLock().unlock();
 		}
@@ -43,6 +51,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			secondaryMapper.putLong(0, size());
 			secondaryMapper.putLong(8, tableLength);
 			secondaryMapper.putLong(16, secondaryWritePos.get());
+			secondaryMapper.putLong(24, rehashComplete.get());
 		} finally {
 			secondaryLock.writeLock().lock();
 		}
@@ -53,10 +62,10 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	}
 	/**Retrieves a record at the given position from the secondary. Does not
 	 * validate the correctness of the position.*/
-	protected WritethruRecord getSecondaryRecord(long pos){
+	protected VarSizeWritethruRecord getSecondaryRecord(long pos){
 		secondaryLock.readLock().lock();
 		try {
-			return new WritethruRecord(secondaryMapper, pos);
+			return VarSizeWritethruRecord.readRecord(secondaryMapper, pos);
 		} finally {
 			secondaryLock.readLock().unlock();
 		}
@@ -78,7 +87,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
 			
-			WritethruRecord record = getSecondaryRecord(adr);
+			VarSizeWritethruRecord record = getSecondaryRecord(adr);
 			while(true){
 				if(record.keyEquals(hash, k)) {
 					return record.getVal();
@@ -103,18 +112,18 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0){
 				final long insertPos = allocateForRecord(toWriteBucket);
-				toWriteBucket.writeAt(secondaryMapper, insertPos);
+				VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 				primaryMapper.putLong(pos, insertPos);
 				size.incrementAndGet();
 				return null;
 			}
-			WritethruRecord bucket = getSecondaryRecord(adr);
+			VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
 			while(true){
 				if(bucket.keyEquals(hash, k)) return bucket.getVal();
 				else if(bucket.getNextRecordPos() != 0) bucket = getSecondaryRecord(bucket.getNextRecordPos());
 				else {
 					final long insertPos = allocateForRecord(toWriteBucket);
-					toWriteBucket.writeAt(secondaryMapper, insertPos);
+					VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 					bucket.setNextRecordPos(insertPos);
 					size.incrementAndGet();
 					return null;
@@ -138,17 +147,17 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) {
-				toWriteBucket.writeAt(secondaryMapper, insertPos);
+				VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 				primaryMapper.putLong(pos, insertPos);
 				return null;
 			}
 			
-			WritethruRecord bucket = getSecondaryRecord(adr);
-			WritethruRecord prev = null;
+			VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
+			VarSizeWritethruRecord prev = null;
 			while(true){
 				if(bucket.keyEquals(hash, k)) {
 					toWriteBucket.setNextRecordPos(bucket.getNextRecordPos());
-					toWriteBucket.writeAt(secondaryMapper, insertPos);
+					VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 					if(prev == null) {
 						primaryMapper.putLong(pos, insertPos);
 					} else {
@@ -161,7 +170,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 					bucket = getSecondaryRecord(bucket.getNextRecordPos());
 				}
 				else {
-					toWriteBucket.writeAt(secondaryMapper, insertPos);
+					VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 					bucket.setNextRecordPos(insertPos);
 					size.incrementAndGet();
 					return null;
@@ -180,8 +189,8 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
 			
-			WritethruRecord bucket = getSecondaryRecord(adr);
-			WritethruRecord prev = null;
+			VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
+			VarSizeWritethruRecord prev = null;
 			while(true){
 				if(bucket.keyEquals(hash, k)) {
 					if(prev == null) primaryMapper.putLong(pos, bucket.getNextRecordPos());
@@ -200,15 +209,15 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	
 	@Override
 	protected void rehashIdx(long idx){
-		final ArrayList<WritethruRecord> keepBuckets = new ArrayList<WritethruRecord>();
-		final ArrayList<WritethruRecord> moveBuckets = new ArrayList<WritethruRecord>();
+		final ArrayList<VarSizeWritethruRecord> keepBuckets = new ArrayList<VarSizeWritethruRecord>();
+		final ArrayList<VarSizeWritethruRecord> moveBuckets = new ArrayList<VarSizeWritethruRecord>();
 		
 		final long keepIdx = idx, moveIdx = idx + tableLength;
 		
 		final long addr = primaryMapper.getLong(idxToPos(idx));
 		if(addr == 0) return;
 
-		WritethruRecord bucket = getSecondaryRecord(addr);
+		VarSizeWritethruRecord bucket = getSecondaryRecord(addr);
 		while(true){
 			final long newIdx = bucket.getHash() & (tableLength + tableLength - 1L);
 			if(newIdx == keepIdx) keepBuckets.add(bucket);
@@ -224,7 +233,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		
 	/**Cause each bucket to point to the subsequent one.  Returns address of original,
 	 * or 0 if the list was empty.*/
-	protected long rewriteChain(List<WritethruRecord> buckets){
+	protected long rewriteChain(List<VarSizeWritethruRecord> buckets){
 		if(buckets.isEmpty()) return 0;
 		buckets.get(buckets.size() - 1).setNextRecordPos(0);
 		for(int i=0; i<buckets.size()-1; i++){
@@ -243,7 +252,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			synchronized(lockForHash(idx)){
 				final long adr = primaryMapper.getLong(pos);
 				if(adr == 0) continue;
-				WritethruRecord bucket = getSecondaryRecord(adr);
+				VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
 				while(true){
 					if(!proc.process(bucket)) return;
 					if(bucket.getNextRecordPos() != 0) {
@@ -260,9 +269,9 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	public double avgRecordSize(){
 		final AtomicLong recordCtr = new AtomicLong(0), recordSizeCtr = new AtomicLong(0);
 		processAllRecords(new RecordProcessor() {
-			public boolean process(WritethruRecord bucket) {
+			public boolean process(Record record) {
 				recordCtr.incrementAndGet();
-				recordSizeCtr.addAndGet(bucket.size());
+				recordSizeCtr.addAndGet(record.size());
 				return true;
 			}
 		});

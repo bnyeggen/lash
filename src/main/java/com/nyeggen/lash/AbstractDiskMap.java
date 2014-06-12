@@ -6,7 +6,7 @@ import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import com.nyeggen.lash.bucket.WritethruRecord;
+import com.nyeggen.lash.bucket.Record;
 import com.nyeggen.lash.util.MMapper;
 
 public abstract class AbstractDiskMap implements Closeable {
@@ -16,12 +16,14 @@ public abstract class AbstractDiskMap implements Closeable {
 	static final double loadRehashThreshold = 0.75;
 	//28 -> 268,435,456; equivalent to 33,554,432 longs
 	static final long defaultFileLength = 1L << 28;
+	static final String primaryFileName = "primary.hash";
+	static final String secondaryFileName = "secondary.hash";
 	
 	final MMapper primaryMapper, secondaryMapper;
 	final String baseFolderLoc;
 
 	/**Allocations in secondary increment from this point*/
-	AtomicLong secondaryWritePos;
+	final AtomicLong secondaryWritePos = new AtomicLong(0);
 	/**Enforces exclusive access to the secondary in the event of a reallocation.*/
 	final ReentrantReadWriteLock secondaryLock = new ReentrantReadWriteLock();
 	
@@ -42,8 +44,8 @@ public abstract class AbstractDiskMap implements Closeable {
 			baseFolder.mkdirs();
 			this.baseFolderLoc = baseFolder.getCanonicalPath();
 			
-			final String primaryLoc = this.baseFolderLoc + File.separator + "primary.hash";
-			final String secondaryLoc = this.baseFolderLoc + File.separator + "secondary.hash";
+			final String primaryLoc = this.baseFolderLoc + File.separator + primaryFileName;
+			final String secondaryLoc = this.baseFolderLoc + File.separator + secondaryFileName;
 			final File primFile = new File(primaryLoc);
 			final File secFile = new File(secondaryLoc);
 			final long primFileLen = Math.max(primaryFileLen, primFile.length());
@@ -57,7 +59,7 @@ public abstract class AbstractDiskMap implements Closeable {
 			throw new RuntimeException(e);
 		}
 	}
-	
+		
 	/**Should only be called in constructor. Loads table metadata from the secondary, or
 	 * initializes to default state if metadata is blank.
 	 * Attempting to read a header from a different subclass of DiskMap will cause
@@ -165,6 +167,28 @@ public abstract class AbstractDiskMap implements Closeable {
 	 * This does not need to acquire a lock; the calling rehash() method handles it.*/
 	protected abstract void rehashIdx(long idx);
 	
+	private void clear(int i){
+		if(i==nLocks){
+			this.secondaryLock.writeLock().lock();
+			try {
+				this.primaryMapper.clear();
+				this.secondaryWritePos.set(getHeaderSize());
+				this.size.set(0);
+				this.rehashComplete.set(0);
+			} finally {
+				this.secondaryLock.writeLock().unlock();
+			}
+		} else {
+			synchronized (locks[i]) {
+				clear(i+1);
+			}
+		}
+	}
+	/**Removes all entries from the map.*/
+	public void clear(){ clear(0); }
+
+	protected abstract long getHeaderSize();
+	
 	/**Writes all header metadata and unmaps the backing mmap'd files.*/
 	@Override
 	public void close() throws IOException {
@@ -196,7 +220,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Interface used in lieu of an iterator for record-processing.*/
 	public static interface RecordProcessor {
 		/**Returns whether we should continue processing.*/
-		public boolean process(WritethruRecord record);
+		public boolean process(Record record);
 	}
 	
 	/**Incrementally run the supplied RecordProcessor on each record.*/

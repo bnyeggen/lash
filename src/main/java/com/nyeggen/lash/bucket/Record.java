@@ -2,8 +2,6 @@ package com.nyeggen.lash.bucket;
 
 import java.util.Arrays;
 
-import com.nyeggen.lash.util.MMapper;
-
 /**This represents a chunk o' bytes that does not have a correspondence (yet)
  * to a particular storage location.*/
 public class Record {
@@ -23,17 +21,6 @@ public class Record {
 		this.nextRecordPos = nextBucket;
 		this.key = key;
 		this.val = val;
-	}
-	
-	public WritethruRecord writeAt(MMapper m, long pos){
-		m.putLong(pos, hash);
-		m.putLong(pos + 8, nextRecordPos);
-		m.putInt(pos + 16, key.length);
-		m.putInt(pos + 20, val.length);
-		m.putBytes(pos + 24, key);
-		m.putBytes(pos + 24 + key.length, val);
-
-		return new WritethruRecord(m, pos, hash, nextRecordPos, key, val);
 	}
 	
 	public long size(){ return 8 + 8 + 4 + 4 + key.length + val.length; }

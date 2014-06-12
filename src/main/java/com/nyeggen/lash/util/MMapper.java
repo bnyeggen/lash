@@ -130,6 +130,10 @@ public class MMapper implements Closeable{
 		return loc;
 	}
 	
+	public void clear(){
+		unsafe.setMemory(addr, size, (byte)0);
+	}
+	
 	/**After Java 7, this is a built-in.  We put it here so it's available
 	 * for testing.*/
 	public static File createTempDir() {
