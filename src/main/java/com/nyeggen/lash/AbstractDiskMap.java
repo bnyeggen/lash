@@ -226,8 +226,6 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Incrementally run the supplied RecordProcessor on each record.*/
 	public abstract void processAllRecords(RecordProcessor proc);
 	
-	/**Returns the byte offset the given bucket number lives at.*/
-	protected abstract long idxToPos(long idx);
 	/**Returns the value corresponding to the given key, or null if it is not
 	 * present.  Zero-width values (ie, a hash set) are supported.*/
 	public abstract byte[] get(byte[] k);

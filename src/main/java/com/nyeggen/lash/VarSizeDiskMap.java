@@ -12,7 +12,9 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 
 	/* In this implementation, the primary mapper just stores long pointers
 	 * into the secondary mapper.*/
-		
+	
+	private static final int PRIMARY_REC_SIZE = 8;
+	
 	public VarSizeDiskMap(String baseFolderLoc){
 		this(baseFolderLoc, 0);
 	}
@@ -37,7 +39,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 					   lastSecondaryPos = secondaryMapper.getLong(16),
 					   rehashComplete = secondaryMapper.getLong(24);
 			this.size.set(size);
-			this.tableLength = bucketsInMap == 0 ? (primaryMapper.size() / 8) : bucketsInMap;
+			this.tableLength = bucketsInMap == 0 ? (primaryMapper.size() / PRIMARY_REC_SIZE) : bucketsInMap;
 			this.secondaryWritePos.set(lastSecondaryPos == 0 ? getHeaderSize() : lastSecondaryPos);
 			this.rehashComplete.set(rehashComplete);
 		} finally {
@@ -56,9 +58,9 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			secondaryLock.writeLock().lock();
 		}
 	}
-	@Override
+
 	protected long idxToPos(long idx){
-		return idx * 8;
+		return idx * PRIMARY_REC_SIZE;
 	}
 	/**Retrieves a record at the given position from the secondary. Does not
 	 * validate the correctness of the position.*/
