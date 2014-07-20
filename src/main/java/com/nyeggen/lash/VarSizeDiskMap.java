@@ -8,11 +8,10 @@ import com.nyeggen.lash.bucket.RecordChainNode;
 import com.nyeggen.lash.bucket.WritethruRecordChainNode;
 import com.nyeggen.lash.util.Hash;
 
+/**An implementation that stores "buckets" consisting of single-record pointers,
+ * which are chained on collision in a secondary file where data is also stored.*/
 public class VarSizeDiskMap extends AbstractDiskMap {
 
-	/* In this implementation, the primary mapper just stores long pointers
-	 * into the secondary mapper.*/
-	
 	private static final int PRIMARY_REC_SIZE = 8;
 	
 	public VarSizeDiskMap(String baseFolderLoc){
