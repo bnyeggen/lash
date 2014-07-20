@@ -6,16 +6,16 @@ import com.nyeggen.lash.util.MMapper;
  * file.  Mutator methods will propagate through to the underlying storage.
  * However, if another writer overwrites data logically corresponding to this
  * bucket, the change will not be reflected in the Java object.*/
-public class VarSizeWritethruRecord extends Record {
+public class WritethruRecordChainNode extends RecordChainNode {
 	final MMapper m;
 	final long pos;
 	
-	public static VarSizeWritethruRecord readRecord(MMapper m, long pos){
-		return new VarSizeWritethruRecord(m, pos);
+	public static WritethruRecordChainNode readRecord(MMapper m, long pos){
+		return new WritethruRecordChainNode(m, pos);
 	}
 	
 	/**Used for reads*/
-	protected VarSizeWritethruRecord(MMapper m, long pos){
+	protected WritethruRecordChainNode(MMapper m, long pos){
 		super();
 		this.m = m;
 		this.pos = pos;
@@ -32,7 +32,7 @@ public class VarSizeWritethruRecord extends Record {
 	}
 	
 	/**Used for writes*/
-	protected VarSizeWritethruRecord(MMapper m, long pos, long hash, long nextRecordPos, byte[] key, byte[] val){
+	protected WritethruRecordChainNode(MMapper m, long pos, long hash, long nextRecordPos, byte[] key, byte[] val){
 		this.m = m;
 		this.pos = pos;
 		this.hash = hash;
@@ -57,7 +57,7 @@ public class VarSizeWritethruRecord extends Record {
 				+ ", KeySize:" + key.length + ", ValSize: " + val.length + "}";
 	}
 	
-	public static VarSizeWritethruRecord writeRecord(Record rec, MMapper m, long pos){
+	public static WritethruRecordChainNode writeRecord(RecordChainNode rec, MMapper m, long pos){
 		m.putLong(pos, rec.hash);
 		m.putLong(pos + 8, rec.nextRecordPos);
 		m.putInt(pos + 16, rec.key.length);
@@ -65,6 +65,6 @@ public class VarSizeWritethruRecord extends Record {
 		m.putBytes(pos + 24, rec.key);
 		m.putBytes(pos + 24 + rec.key.length, rec.val);
 
-		return new VarSizeWritethruRecord(m, pos, rec.hash, rec.nextRecordPos, rec.key, rec.val);
+		return new WritethruRecordChainNode(m, pos, rec.hash, rec.nextRecordPos, rec.key, rec.val);
 	}
 }

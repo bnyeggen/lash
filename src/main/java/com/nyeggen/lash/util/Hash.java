@@ -44,6 +44,7 @@ public final class Hash {
 		h *= m;
 		h ^= h >>> r;
 
-		return Math.abs(h);
+		//Clear sign bit
+		return (h << 1) >>> 1;
 	}
 }

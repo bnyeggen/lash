@@ -6,7 +6,7 @@ import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import com.nyeggen.lash.bucket.Record;
+import com.nyeggen.lash.bucket.RecordChainNode;
 import com.nyeggen.lash.util.MMapper;
 
 public abstract class AbstractDiskMap implements Closeable {
@@ -69,6 +69,13 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Embeds table metadata in the secondary to enable persistent tables.
 	 * Typically called via close() method.*/
 	protected abstract void writeHeader();
+	
+	protected static long nextPowerOf2(long i){
+		if(i < (1<<28)) return (1<<28);
+		if((i & (i-1))==0) return i;
+		return (1 << (64 - (Long.numberOfLeadingZeros(i))));
+	}
+
 	
 	protected Object lockForHash(long hash){
 		return locks[(int)(hash & (nLocks - 1))];	
@@ -220,7 +227,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Interface used in lieu of an iterator for record-processing.*/
 	public static interface RecordProcessor {
 		/**Returns whether we should continue processing.*/
-		public boolean process(Record record);
+		public boolean process(RecordChainNode record);
 	}
 	
 	/**Incrementally run the supplied RecordProcessor on each record.*/

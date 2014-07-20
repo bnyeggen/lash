@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.nyeggen.lash.bucket.Record;
-import com.nyeggen.lash.bucket.VarSizeWritethruRecord;
+import com.nyeggen.lash.bucket.RecordChainNode;
+import com.nyeggen.lash.bucket.WritethruRecordChainNode;
 import com.nyeggen.lash.util.Hash;
 
 public class VarSizeDiskMap extends AbstractDiskMap {
@@ -21,16 +21,11 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	public VarSizeDiskMap(String baseFolderLoc, long primaryFileLen){
 		super(baseFolderLoc, nextPowerOf2(primaryFileLen));
 	}
-		
-	private static long nextPowerOf2(long i){
-		if(i < (1<<28)) return (1<<28);
-		if((i & (i-1))==0) return i;
-		return (1 << (64 - (Long.numberOfLeadingZeros(i))));
-	}
 	
 	@Override
 	protected long getHeaderSize() { return 32; }
-	
+
+	@Override
 	protected void readHeader(){
 		secondaryLock.readLock().lock();
 		try {
@@ -47,6 +42,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		}
 	}
 
+	@Override
 	protected void writeHeader(){
 		secondaryLock.writeLock().lock();
 		try {
@@ -64,10 +60,10 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	}
 	/**Retrieves a record at the given position from the secondary. Does not
 	 * validate the correctness of the position.*/
-	protected VarSizeWritethruRecord getSecondaryRecord(long pos){
+	protected WritethruRecordChainNode getSecondaryRecord(long pos){
 		secondaryLock.readLock().lock();
 		try {
-			return VarSizeWritethruRecord.readRecord(secondaryMapper, pos);
+			return WritethruRecordChainNode.readRecord(secondaryMapper, pos);
 		} finally {
 			secondaryLock.readLock().unlock();
 		}
@@ -75,7 +71,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	
 	/**Allocates sufficient space for the record to be written to secondary
 	/* at the returned position.*/
-	protected long allocateForRecord(final Record record){
+	protected long allocateForRecord(final RecordChainNode record){
 		final long recordSize = record.size();
 		return allocateSecondary(recordSize);
 	}
@@ -89,7 +85,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
 			
-			VarSizeWritethruRecord record = getSecondaryRecord(adr);
+			WritethruRecordChainNode record = getSecondaryRecord(adr);
 			while(true){
 				if(record.keyEquals(hash, k)) {
 					return record.getVal();
@@ -106,7 +102,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		if(load() > loadRehashThreshold) rehash();
 
 		final long hash = Hash.murmurHash(k);
-		final Record toWriteBucket = new Record(hash, k, v);
+		final RecordChainNode toWriteBucket = new RecordChainNode(hash, k, v);
 		
 		synchronized(lockForHash(hash)){
 			final long idx = idxForHash(hash);
@@ -114,18 +110,18 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0){
 				final long insertPos = allocateForRecord(toWriteBucket);
-				VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+				WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 				primaryMapper.putLong(pos, insertPos);
 				size.incrementAndGet();
 				return null;
 			}
-			VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
+			WritethruRecordChainNode bucket = getSecondaryRecord(adr);
 			while(true){
 				if(bucket.keyEquals(hash, k)) return bucket.getVal();
 				else if(bucket.getNextRecordPos() != 0) bucket = getSecondaryRecord(bucket.getNextRecordPos());
 				else {
 					final long insertPos = allocateForRecord(toWriteBucket);
-					VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+					WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 					bucket.setNextRecordPos(insertPos);
 					size.incrementAndGet();
 					return null;
@@ -139,7 +135,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		if(load() > loadRehashThreshold) rehash();
 		
 		final long hash = Hash.murmurHash(k);
-		final Record toWriteBucket = new Record(hash, k, v);
+		final RecordChainNode toWriteBucket = new RecordChainNode(hash, k, v);
 		//We'll be inserting somewhere
 		final long insertPos = allocateForRecord(toWriteBucket);
 		
@@ -149,17 +145,17 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) {
-				VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+				WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 				primaryMapper.putLong(pos, insertPos);
 				return null;
 			}
 			
-			VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
-			VarSizeWritethruRecord prev = null;
+			WritethruRecordChainNode bucket = getSecondaryRecord(adr);
+			WritethruRecordChainNode prev = null;
 			while(true){
 				if(bucket.keyEquals(hash, k)) {
 					toWriteBucket.setNextRecordPos(bucket.getNextRecordPos());
-					VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+					WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 					if(prev == null) {
 						primaryMapper.putLong(pos, insertPos);
 					} else {
@@ -172,7 +168,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 					bucket = getSecondaryRecord(bucket.getNextRecordPos());
 				}
 				else {
-					VarSizeWritethruRecord.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+					WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
 					bucket.setNextRecordPos(insertPos);
 					size.incrementAndGet();
 					return null;
@@ -191,8 +187,8 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			final long adr = primaryMapper.getLong(pos);
 			if(adr == 0) return null;
 			
-			VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
-			VarSizeWritethruRecord prev = null;
+			WritethruRecordChainNode bucket = getSecondaryRecord(adr);
+			WritethruRecordChainNode prev = null;
 			while(true){
 				if(bucket.keyEquals(hash, k)) {
 					if(prev == null) primaryMapper.putLong(pos, bucket.getNextRecordPos());
@@ -211,15 +207,15 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	
 	@Override
 	protected void rehashIdx(long idx){
-		final ArrayList<VarSizeWritethruRecord> keepBuckets = new ArrayList<VarSizeWritethruRecord>();
-		final ArrayList<VarSizeWritethruRecord> moveBuckets = new ArrayList<VarSizeWritethruRecord>();
+		final ArrayList<WritethruRecordChainNode> keepBuckets = new ArrayList<WritethruRecordChainNode>();
+		final ArrayList<WritethruRecordChainNode> moveBuckets = new ArrayList<WritethruRecordChainNode>();
 		
 		final long keepIdx = idx, moveIdx = idx + tableLength;
 		
 		final long addr = primaryMapper.getLong(idxToPos(idx));
 		if(addr == 0) return;
 
-		VarSizeWritethruRecord bucket = getSecondaryRecord(addr);
+		WritethruRecordChainNode bucket = getSecondaryRecord(addr);
 		while(true){
 			final long newIdx = bucket.getHash() & (tableLength + tableLength - 1L);
 			if(newIdx == keepIdx) keepBuckets.add(bucket);
@@ -235,7 +231,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		
 	/**Cause each bucket to point to the subsequent one.  Returns address of original,
 	 * or 0 if the list was empty.*/
-	protected long rewriteChain(List<VarSizeWritethruRecord> buckets){
+	protected long rewriteChain(List<WritethruRecordChainNode> buckets){
 		if(buckets.isEmpty()) return 0;
 		buckets.get(buckets.size() - 1).setNextRecordPos(0);
 		for(int i=0; i<buckets.size()-1; i++){
@@ -254,7 +250,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			synchronized(lockForHash(idx)){
 				final long adr = primaryMapper.getLong(pos);
 				if(adr == 0) continue;
-				VarSizeWritethruRecord bucket = getSecondaryRecord(adr);
+				WritethruRecordChainNode bucket = getSecondaryRecord(adr);
 				while(true){
 					if(!proc.process(bucket)) return;
 					if(bucket.getNextRecordPos() != 0) {
@@ -271,7 +267,7 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	public double avgRecordSize(){
 		final AtomicLong recordCtr = new AtomicLong(0), recordSizeCtr = new AtomicLong(0);
 		processAllRecords(new RecordProcessor() {
-			public boolean process(Record record) {
+			public boolean process(RecordChainNode record) {
 				recordCtr.incrementAndGet();
 				recordSizeCtr.addAndGet(record.size());
 				return true;

@@ -4,19 +4,19 @@ import java.util.Arrays;
 
 /**This represents a chunk o' bytes that does not have a correspondence (yet)
  * to a particular storage location.*/
-public class Record {
+public class RecordChainNode {
 	long hash;
 	long nextRecordPos;
 	byte[] key;
 	byte[] val;
 	
-	protected Record(){}
+	protected RecordChainNode(){}
 	
-	public Record(long hash, byte[] key, byte[] val){
+	public RecordChainNode(long hash, byte[] key, byte[] val){
 		this(hash, 0, key, val);
 	}
 	
-	public Record(long hash, long nextBucket, byte[] key, byte[] val){
+	public RecordChainNode(long hash, long nextBucket, byte[] key, byte[] val){
 		this.hash = hash;
 		this.nextRecordPos = nextBucket;
 		this.key = key;
