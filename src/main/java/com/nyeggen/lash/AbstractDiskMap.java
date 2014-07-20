@@ -66,9 +66,23 @@ public abstract class AbstractDiskMap implements Closeable {
 	 * undefined behavior, corruption, and bad times.*/
 	protected abstract void readHeader();
 
+	protected long getHeaderSize() { return 32; }
+
 	/**Embeds table metadata in the secondary to enable persistent tables.
 	 * Typically called via close() method.*/
-	protected abstract void writeHeader();
+	protected void writeHeader(){
+		secondaryLock.writeLock().lock();
+		try {
+			secondaryMapper.putLong(0, size());
+			secondaryMapper.putLong(8, tableLength);
+			secondaryMapper.putLong(16, secondaryWritePos.get());
+			secondaryMapper.putLong(24, rehashComplete.get());
+		} finally {
+			secondaryLock.writeLock().lock();
+		}
+	}
+	
+
 	
 	protected static long nextPowerOf2(long i){
 		if(i < (1<<28)) return (1<<28);
@@ -193,8 +207,6 @@ public abstract class AbstractDiskMap implements Closeable {
 	}
 	/**Removes all entries from the map.*/
 	public void clear(){ clear(0); }
-
-	protected abstract long getHeaderSize();
 	
 	/**Writes all header metadata and unmaps the backing mmap'd files.*/
 	@Override

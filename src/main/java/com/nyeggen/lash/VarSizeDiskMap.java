@@ -21,9 +21,6 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	public VarSizeDiskMap(String baseFolderLoc, long primaryFileLen){
 		super(baseFolderLoc, nextPowerOf2(primaryFileLen));
 	}
-	
-	@Override
-	protected long getHeaderSize() { return 32; }
 
 	@Override
 	protected void readHeader(){
@@ -39,19 +36,6 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 			this.rehashComplete.set(rehashComplete);
 		} finally {
 			secondaryLock.readLock().unlock();
-		}
-	}
-
-	@Override
-	protected void writeHeader(){
-		secondaryLock.writeLock().lock();
-		try {
-			secondaryMapper.putLong(0, size());
-			secondaryMapper.putLong(8, tableLength);
-			secondaryMapper.putLong(16, secondaryWritePos.get());
-			secondaryMapper.putLong(24, rehashComplete.get());
-		} finally {
-			secondaryLock.writeLock().lock();
 		}
 	}
 

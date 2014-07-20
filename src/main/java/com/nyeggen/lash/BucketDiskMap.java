@@ -24,9 +24,6 @@ public class BucketDiskMap extends AbstractDiskMap {
 	}
 	
 	@Override
-	protected long getHeaderSize() { return 32; }
-
-	@Override
 	protected void readHeader(){
 		secondaryLock.readLock().lock();
 		try {
@@ -43,19 +40,6 @@ public class BucketDiskMap extends AbstractDiskMap {
 		}
 	}
 
-	@Override
-	protected void writeHeader(){
-		secondaryLock.writeLock().lock();
-		try {
-			secondaryMapper.putLong(0, size());
-			secondaryMapper.putLong(8, tableLength);
-			secondaryMapper.putLong(16, secondaryWritePos.get());
-			secondaryMapper.putLong(24, rehashComplete.get());
-		} finally {
-			secondaryLock.writeLock().lock();
-		}
-	}
-	
 	protected long idxToPos(long idx){
 		return idx * bucketByteSize;
 	}
