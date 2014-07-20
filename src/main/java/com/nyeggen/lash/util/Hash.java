@@ -4,7 +4,37 @@ public final class Hash {
 	private Hash(){}
 	
 	public static final int hashSeed = 0xe17a1465;
+	
+	/**Return a number greater than i whose bottom n bits collide when hashed.*/
+	public static final long findCollision(long i, long nBits){
+		final long mask = (1L << nBits) - 1;
+		final long targetHash = Hash.murmurHash(i) & mask;
+		
+		for(i = i+1; i<Long.MAX_VALUE; i++){
+			if((Hash.murmurHash(i) & mask) == targetHash) return i;
+		}
+		return -1;
+	}
+	
+	/**Utility to hash a single value*/
+	public static final long murmurHash(long k){
+		final long m = 0xc6a4a7935bd1e995L;
+		final int r = 47;
 
+		long h = (hashSeed & 0xffffffffl)^(8*m);
+		
+		k *= m;
+		k ^= k >>> r;
+		k *= m;
+		h ^= k;
+		h *= m;
+		h ^= h >>> r;
+		h *= m;
+		h ^= h >>> r;
+
+		return h & 0x7fffffffffffffffL;
+	}
+	
 	/**Modified to always return positive number. Murmurhash2 with 64-bit output.*/
 	public static final long murmurHash(byte[] data){
 		final int length = data.length;
@@ -45,6 +75,6 @@ public final class Hash {
 		h ^= h >>> r;
 
 		//Clear sign bit
-		return (h << 1) >>> 1;
+		return h & 0x7fffffffffffffffL;
 	}
 }
