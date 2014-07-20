@@ -8,7 +8,9 @@ import com.nyeggen.lash.bucket.RecordPtr;
 import com.nyeggen.lash.util.Hash;
 import com.nyeggen.lash.util.MMapper;
 
-/**Each bucket is a multi-record mini-hash table.*/
+/**Each bucket is a multi-record mini-hash table that stores multiple pointers
+ * into secondary.  If a bucket overflows, we chain to a second bucket of
+ * pointers stored in secondary.*/
 public class BucketDiskMap extends AbstractDiskMap {
 
 	protected final static int bucketByteSize = 4096;
@@ -51,8 +53,11 @@ public class BucketDiskMap extends AbstractDiskMap {
 	protected long subPosForSubIdx(long bucketPos, long subIdx){
 		return bucketPos + bucketHeaderSize + subIdx*recordSize;
 	}
+	protected long getNextBucketPos(long bucketPos, MMapper mapper){
+		return mapper.getLong(bucketPos);
+	}
 	
-	private static class SearchResult {
+	protected static class SearchResult {
 		//If finding is successful, we do not need to find the free position or last bucket.
 		//If we do not find k, and there are no free positions, we may only set the last
 		//bucket.
@@ -134,7 +139,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 		MMapper mapper = primaryMapper;
 
 		long bucketPos = idxToPos(idx);
-		long nextBucketPos = mapper.getLong(bucketPos);
+		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
 		
 		if(findInBucket(mapper, hash, k, bucketPos, startSubIdx, out)) 
 			return out;
@@ -143,7 +148,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 		//Chain to next bucket
 		while(nextBucketPos != 0){
 			bucketPos = nextBucketPos;
-			nextBucketPos = mapper.getLong(bucketPos);
+			nextBucketPos = getNextBucketPos(bucketPos, mapper);
 			if(findInBucket(mapper, hash, k, bucketPos, startSubIdx, out))
 				return out;
 		}
@@ -155,7 +160,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 
 	/**Accumulates a list of RecordPtrs in that bucket, and any of its child buckets.*/
 	private void accumRecordsInBucketChain(long bucketPos, MMapper mapper, List<RecordPtr> accum){
-		long nextBucketPos = mapper.getLong(bucketPos);
+		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
 		for(int subIdx=0; subIdx<recordsPerBucket; subIdx++){
 			final long subPos = subPosForSubIdx(bucketPos, subIdx);
 			final RecordPtr recPtr = new RecordPtr(mapper, subPos);
@@ -192,7 +197,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 			}
 		}
 		if(toWrite.size() <= recordsPerBucketTarget) return;
-		long nextBucketPos = mapper.getLong(bucketPos);
+		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
 		if(nextBucketPos == 0){
 			nextBucketPos = allocateSecondaryBucket(mapper, bucketPos);
 		}
