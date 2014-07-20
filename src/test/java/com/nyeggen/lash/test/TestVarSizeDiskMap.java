@@ -22,15 +22,16 @@ public class TestVarSizeDiskMap {
 		final String dir = tmpDir.getCanonicalPath();
 		final AbstractDiskMap dmap = new VarSizeDiskMap(dir, 0);
 		final AtomicLong ctr = new AtomicLong(0);
+		final int recsPerThread = 750000;
 		try {
-			final Thread t1 = new Thread(Helper.makeLongInserter(ctr, dmap, 0       , 750000));
-			final Thread t2 = new Thread(Helper.makeLongInserter(ctr, dmap, 750000 , 1500000));
-			final Thread t3 = new Thread(Helper.makeLongInserter(ctr, dmap, 1500000, 2250000));
-			final Thread t4 = new Thread(Helper.makeLongInserter(ctr, dmap, 2250000, 3000000));
+			final Thread t1 = new Thread(Helper.makeLongInserter(ctr, dmap, recsPerThread*0, recsPerThread*1));
+			final Thread t2 = new Thread(Helper.makeLongInserter(ctr, dmap, recsPerThread*1, recsPerThread*2));
+			final Thread t3 = new Thread(Helper.makeLongInserter(ctr, dmap, recsPerThread*2, recsPerThread*3));
+			final Thread t4 = new Thread(Helper.makeLongInserter(ctr, dmap, recsPerThread*3, recsPerThread*4));
 
 			t1.start(); t2.start(); t3.start(); t4.start();
 			t1.join();  t2.join();  t3.join();  t4.join();
-			for(long i=0; i<3000000; i++){
+			for(long i=0; i<recsPerThread*4; i++){
 				assertEquals(Helper.bytesToLong(dmap.get(Helper.longToBytes(i))), i+1);
 			}
 		} finally {
