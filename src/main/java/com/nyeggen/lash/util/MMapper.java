@@ -37,6 +37,17 @@ public class MMapper implements Closeable{
 			throw new RuntimeException(e);
 		}
 	}
+	
+	private class MMapIndexOOBException extends IndexOutOfBoundsException{
+		final long pos;
+		public MMapIndexOOBException(long pos) {
+			this.pos = pos;
+		}
+		@Override
+		public String toString() {
+			return "Access: " + pos + ". Map covers [" + 0 +", " + size + "]";
+		}
+	}
 
 	//Bundle reflection calls to get access to the given method
 	private static Method getMethod(Class<?> cls, String name, Class<?>... params) throws Exception {
@@ -94,35 +105,43 @@ public class MMapper implements Closeable{
 	}
 	
 	public byte getByte(long pos){
+		if(pos>=size) throw new MMapIndexOOBException(pos);
 		return unsafe.getByte(pos + addr);
 	}
 	
 	public int getInt(long pos){
+		if(pos+4>size) throw new MMapIndexOOBException(pos);
 		return unsafe.getInt(pos + addr);
 	}
 
 	public long getLong(long pos){
+		if(pos+8>size) throw new MMapIndexOOBException(pos);
 		return unsafe.getLong(pos + addr);
 	}
 
 	public void putByte(long pos, byte val){
-		unsafe.putByte(pos, val);
+		if(pos>=size) throw new MMapIndexOOBException(pos);
+		unsafe.putByte(pos + addr, val);
 	}
 
 	public void putInt(long pos, int val){
+		if(pos+4>size) throw new MMapIndexOOBException(pos);
 		unsafe.putInt(pos + addr, val);
 	}
 
 	public void putLong(long pos, long val){
+		if(pos+8>size) throw new MMapIndexOOBException(pos);
 		unsafe.putLong(pos + addr, val);
 	}
 	
 	//May want to have offset & length within data as well, for both of these
 	public void getBytes(long pos, byte[] data){
+		if(pos+data.length>size) throw new MMapIndexOOBException(pos);
 		unsafe.copyMemory(null, pos + addr, data, BYTE_ARRAY_OFFSET, data.length);
 	}
 
 	public void putBytes(long pos, byte[] data){
+		if(pos+data.length>size) throw new MMapIndexOOBException(pos);
 		unsafe.copyMemory(data, BYTE_ARRAY_OFFSET, null, pos + addr, data.length);
 	}
 	
