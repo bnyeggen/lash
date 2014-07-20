@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import com.nyeggen.lash.bucket.RecordPtr;
 import com.nyeggen.lash.util.Hash;
 import com.nyeggen.lash.util.MMapper;
 
@@ -49,45 +50,6 @@ public class BucketDiskMap extends AbstractDiskMap {
 	}
 	protected long subPosForSubIdx(long bucketPos, long subIdx){
 		return bucketPos + bucketHeaderSize + subIdx*recordSize;
-	}
-
-	private static class RecordPtr{
-		long hash, dataPtr;
-		int kLength, vLength;
-		private RecordPtr(long hash, long dataPtr, int kLength, int vLength){
-			this.hash = hash;
-			this.dataPtr = dataPtr;
-			this.kLength = kLength;
-			this.vLength = vLength;
-		}
-		public RecordPtr(MMapper mapper, long pos) {
-			hash = mapper.getLong(pos);
-			dataPtr = mapper.getLong(pos + 8);
-			kLength = mapper.getInt(pos + 16);
-			vLength = mapper.getInt(pos + 20);
-		}
-		public static RecordPtr overwrite(MMapper mapper, long pos, long hash, long dataPtr, int kLength, int vLength){
-			mapper.putLong(pos,  hash);
-			mapper.putLong(pos+8, dataPtr);
-			mapper.putInt(pos+16, kLength);
-			mapper.putInt(pos+20, vLength);
-			return new RecordPtr(hash, dataPtr, kLength, vLength);	
-		}
-		
-		public RecordPtr writeToPos(final long pos, final MMapper mapper){
-			return overwrite(mapper, pos, hash, dataPtr, kLength, vLength);
-		}
-		
-		public static RecordPtr writeDeleted(MMapper mapper, long pos){
-			return overwrite(mapper, pos, -1, -1, -1, -1);
-		}
-				
-		public boolean matchesData(long hash, int kLength){
-			return this.hash == hash && this.kLength == kLength;
-		}
-		public boolean isWritable(){ return dataPtr == 0 || dataPtr == -1; }
-		public boolean isFree(){ return dataPtr == 0; }
-		public boolean isDeleted(){ return dataPtr == -1; }
 	}
 	
 	private static class SearchResult {
@@ -241,15 +203,15 @@ public class BucketDiskMap extends AbstractDiskMap {
 	protected void rehashIdx(long idx) {
 		final long keepIdx = idx, moveIdx = idx + tableLength;
 		
-		final ArrayList<RecordPtr> keepBuckets = new ArrayList<BucketDiskMap.RecordPtr>();
-		final ArrayList<RecordPtr> moveBuckets = new ArrayList<BucketDiskMap.RecordPtr>();
+		final ArrayList<RecordPtr> keepBuckets = new ArrayList<RecordPtr>();
+		final ArrayList<RecordPtr> moveBuckets = new ArrayList<RecordPtr>();
 
 		long keepBucketPos = idxToPos(idx);
 		long moveBucketPos = idxToPos(moveIdx);
 
 		//Accumulate all the old pointer records
 		{
-			final ArrayList<RecordPtr> allBuckets  = new ArrayList<BucketDiskMap.RecordPtr>();
+			final ArrayList<RecordPtr> allBuckets  = new ArrayList<RecordPtr>();
 			accumRecordsInBucketChain(keepBucketPos, primaryMapper, allBuckets);
 			//And filter
 			for(final RecordPtr recPtr : allBuckets){
