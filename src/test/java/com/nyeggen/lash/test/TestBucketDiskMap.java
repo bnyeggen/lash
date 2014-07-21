@@ -34,7 +34,8 @@ public class TestBucketDiskMap {
 			t1.join();  t2.join();  t3.join();  t4.join();
 			System.out.println("Checking inserted values...");
 			for(long i=0; i<recsPerThread*4; i++){
-				assertEquals(i+1, InsertHelper.bytesToLong(dmap.get(InsertHelper.longToBytes(i))));
+				assertEquals(i+1
+						, InsertHelper.bytesToLong(dmap.get(InsertHelper.longToBytes(i))));
 			}
 		} finally {
 			dmap.delete();
@@ -59,7 +60,9 @@ public class TestBucketDiskMap {
 			System.out.println("Checking inserted values...");
 			for(int idx=0; idx<collisions.length; idx++){
 				final long i = collisions[idx];
-				assertEquals("Unexpected inequality on index " + idx + ".", i+1, InsertHelper.bytesToLong(dmap.get(TestHelper.longToBytes(i))));
+				assertEquals("Unexpected inequality on index " + idx + "."
+					, i+1
+					, InsertHelper.bytesToLong(dmap.get(InsertHelper.longToBytes(i))));
 			}
 		} finally {
 			dmap.close();
