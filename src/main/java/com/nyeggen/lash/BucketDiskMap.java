@@ -144,9 +144,9 @@ public class BucketDiskMap extends AbstractDiskMap {
 		if(findInBucket(mapper, hash, k, bucketPos, startSubIdx, out)) 
 			return out;
 		
-		mapper = secondaryMapper;
 		//Chain to next bucket
 		while(nextBucketPos != 0){
+			mapper = secondaryMapper;
 			bucketPos = nextBucketPos;
 			nextBucketPos = getNextBucketPos(bucketPos, mapper);
 			if(findInBucket(mapper, hash, k, bucketPos, startSubIdx, out))
@@ -262,7 +262,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 				//Write new, in a new bucket
 				final RecordPtr recPtr = new RecordPtr(hash, dataPtr, k.length, v.length);
 				final long bucketPos = allocateSecondaryBucket(sr.lastBucketMapper, sr.lastBucketPos);
-				writeRecordsToBucketChain(bucketPos, sr.lastBucketMapper, Arrays.asList(new RecordPtr[]{recPtr}));
+				writeRecordsToBucketChain(bucketPos, secondaryMapper, Arrays.asList(new RecordPtr[]{recPtr}));
 				size.incrementAndGet();
 			}
 			return sr.val;
