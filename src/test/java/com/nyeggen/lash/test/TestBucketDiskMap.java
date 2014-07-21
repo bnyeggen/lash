@@ -13,7 +13,7 @@ import com.nyeggen.lash.AbstractDiskMap;
 import com.nyeggen.lash.BucketDiskMap;
 import com.nyeggen.lash.util.Hash;
 import com.nyeggen.lash.util.MMapper;
-import com.nyeggen.lash.util.TestHelper;
+import com.nyeggen.lash.util.InsertHelper;
 
 @RunWith(JUnit4.class)
 public class TestBucketDiskMap {
@@ -25,16 +25,16 @@ public class TestBucketDiskMap {
 		final AtomicLong ctr = new AtomicLong(0);
 		final int recsPerThread = 2000000;
 		try {
-			final Thread t1 = new Thread(TestHelper.makeLongInserter(ctr, dmap, recsPerThread*0, recsPerThread*1));
-			final Thread t2 = new Thread(TestHelper.makeLongInserter(ctr, dmap, recsPerThread*1, recsPerThread*2));
-			final Thread t3 = new Thread(TestHelper.makeLongInserter(ctr, dmap, recsPerThread*2, recsPerThread*3));
-			final Thread t4 = new Thread(TestHelper.makeLongInserter(ctr, dmap, recsPerThread*3, recsPerThread*4));
+			final Thread t1 = new Thread(InsertHelper.makeLongInserter(ctr, dmap, recsPerThread*0, recsPerThread*1));
+			final Thread t2 = new Thread(InsertHelper.makeLongInserter(ctr, dmap, recsPerThread*1, recsPerThread*2));
+			final Thread t3 = new Thread(InsertHelper.makeLongInserter(ctr, dmap, recsPerThread*2, recsPerThread*3));
+			final Thread t4 = new Thread(InsertHelper.makeLongInserter(ctr, dmap, recsPerThread*3, recsPerThread*4));
 
 			t1.start(); t2.start(); t3.start(); t4.start();
 			t1.join();  t2.join();  t3.join();  t4.join();
 			System.out.println("Checking inserted values...");
 			for(long i=0; i<recsPerThread*4; i++){
-				assertEquals(i+1, TestHelper.bytesToLong(dmap.get(TestHelper.longToBytes(i))));
+				assertEquals(i+1, InsertHelper.bytesToLong(dmap.get(InsertHelper.longToBytes(i))));
 			}
 		} finally {
 			dmap.delete();
@@ -54,12 +54,12 @@ public class TestBucketDiskMap {
 			}
 			
 			for(final long i : collisions){
-				dmap.put(TestHelper.longToBytes(i), TestHelper.longToBytes(i+1));
+				dmap.put(InsertHelper.longToBytes(i), InsertHelper.longToBytes(i+1));
 			}
 			System.out.println("Checking inserted values...");
 			for(int idx=0; idx<collisions.length; idx++){
 				final long i = collisions[idx];
-				assertEquals("Unexpected inequality on index " + idx + ".", i+1, TestHelper.bytesToLong(dmap.get(TestHelper.longToBytes(i))));
+				assertEquals("Unexpected inequality on index " + idx + ".", i+1, InsertHelper.bytesToLong(dmap.get(TestHelper.longToBytes(i))));
 			}
 		} finally {
 			dmap.close();
