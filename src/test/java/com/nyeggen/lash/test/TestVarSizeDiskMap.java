@@ -56,7 +56,7 @@ public class TestVarSizeDiskMap {
 			final Thread t4 = new Thread(new Runnable() {
 				@Override
 				public void run() {
-					for(long i=recsPerThread; i<recsPerThread*4; i++){
+					for(long i=recsPerThread*3; i<recsPerThread*4; i++){
 						final byte[] k = InsertHelper.longToBytes(i);
 						final byte[] v = InsertHelper.longToBytes(i+1);
 						dmap.put(k, v);
