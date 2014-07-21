@@ -35,6 +35,29 @@ public final class Hash {
 		return h & 0x7fffffffffffffffL;
 	}
 	
+	public static final long murmurHash(long[] data){
+		final int length = data.length;
+		final long m = 0xc6a4a7935bd1e995L;
+		final int r = 47;
+		
+		long h = (hashSeed & 0xffffffffl)^(length*8*m);
+		
+		for(int i=0; i<length; i++){
+			long k=data[i];
+			k *= m;
+			k ^= k >>> r;
+			k *= m;
+			h ^= k;
+			h *= m;
+		}
+		
+		h ^= h >>> r;
+		h *= m;
+		h ^= h >>> r;
+
+		return h & 0x7fffffffffffffffL;
+	}
+	
 	/**Modified to always return positive number. Murmurhash2 with 64-bit output.*/
 	public static final long murmurHash(byte[] data){
 		final int length = data.length;
