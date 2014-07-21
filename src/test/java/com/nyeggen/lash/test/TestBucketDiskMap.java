@@ -18,9 +18,6 @@ import com.nyeggen.lash.util.InsertHelper;
 public class TestBucketDiskMap {
 	@Test
 	public void testConcurrentInserts() throws Exception {
-		//This fails reliably at 106052 -> 106053
-		//But oddly not the testInserts, which just runs in the main thread
-		//rather than a single forked thread?
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
 		final AbstractDiskMap dmap = new BucketDiskMap(dir);
