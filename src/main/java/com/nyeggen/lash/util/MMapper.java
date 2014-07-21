@@ -39,6 +39,7 @@ public class MMapper implements Closeable{
 	}
 	
 	private class MMapIndexOOBException extends IndexOutOfBoundsException{
+		private static final long serialVersionUID = 5471155580682412381L;
 		final long pos;
 		public MMapIndexOOBException(long pos) {
 			this.pos = pos;
