@@ -39,4 +39,14 @@ public class RecordPtr{
 	public boolean isWritable(){ return dataPtr == 0 || dataPtr == -1; }
 	public boolean isFree(){ return dataPtr == 0; }
 	public boolean isDeleted(){ return dataPtr == -1; }
+	public byte[] getKey(MMapper mapper){
+		final byte[] out = new byte[kLength];
+		mapper.getBytes(dataPtr, out);
+		return out;
+	}
+	public byte[] getVal(MMapper mapper){
+		final byte[] out = new byte[vLength];
+		mapper.getBytes(dataPtr + kLength, out);
+		return out;
+	}
 }
