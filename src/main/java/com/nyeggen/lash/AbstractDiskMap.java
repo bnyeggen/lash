@@ -3,10 +3,11 @@ package com.nyeggen.lash;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import com.nyeggen.lash.bucket.RecordChainNode;
 import com.nyeggen.lash.util.MMapper;
 
 public abstract class AbstractDiskMap implements Closeable {
@@ -235,15 +236,6 @@ public abstract class AbstractDiskMap implements Closeable {
 	public double load(){
 		return size.doubleValue() / (tableLength + (tableLength/nLocks)*rehashComplete.get());
 	}
-
-	/**Interface used in lieu of an iterator for record-processing.*/
-	public static interface RecordProcessor {
-		/**Returns whether we should continue processing.*/
-		public boolean process(RecordChainNode record);
-	}
-	
-	/**Incrementally run the supplied RecordProcessor on each record.*/
-	public abstract void processAllRecords(RecordProcessor proc);
 	
 	/**Returns the value corresponding to the given key, or null if it is not
 	 * present.  Zero-width values (ie, a hash set) are supported.*/
@@ -258,4 +250,12 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Remove the record associated with the given key, returning the previous value, or
 	 * null if there was none.*/
 	public abstract byte[] remove(byte[] k);
+	
+	public abstract boolean remove(byte[] k, byte[] v);
+	public abstract byte[] replace(byte[] k, byte[] v);
+	public abstract boolean replace(byte[] k, byte[] prevVal, byte[] newVal);
+	public boolean containsKey(byte[] k){
+		return get(k) != null;
+	};
+	public abstract Iterator<Map.Entry<byte[],byte[]>> iterator();
 }

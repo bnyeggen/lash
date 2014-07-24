@@ -1,8 +1,13 @@
 package com.nyeggen.lash;
 
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Map.Entry;
 
 import com.nyeggen.lash.bucket.RecordPtr;
 import com.nyeggen.lash.util.Hash;
@@ -232,11 +237,6 @@ public class BucketDiskMap extends AbstractDiskMap {
 	}
 
 	@Override
-	public void processAllRecords(RecordProcessor proc) {
-		throw new UnsupportedOperationException("Not implemented yet");
-	}
-
-	@Override
 	public byte[] get(byte[] k) {
 		final long hash = Hash.murmurHash(k);
 		synchronized(lockForHash(hash)){
@@ -306,6 +306,49 @@ public class BucketDiskMap extends AbstractDiskMap {
 		}
 	}
 	
+	@Override
+	public boolean remove(byte[] k, byte[] v) {
+		final long hash = Hash.murmurHash(k);
+		synchronized(lockForHash(hash)){
+			final SearchResult sr = locateRecord(k, hash);
+			if(Arrays.equals(sr.val, v)){
+				RecordPtr.writeDeleted(sr.foundMapper, sr.foundPos);
+				size.decrementAndGet();
+				return true;
+			}
+			return false;
+		}
+	}
+	
+	@Override
+	public byte[] replace(byte[] k, byte[] v) {
+		final long hash = Hash.murmurHash(k);
+		synchronized(lockForHash(hash)){
+			final SearchResult sr = locateRecord(k, hash);
+			if(sr.val != null){
+				//We could be optimistic and write this outside the lock.
+				final long dataPtr = writeKeyVal(k, v);
+				RecordPtr.overwrite(sr.foundMapper, sr.foundPos, hash, dataPtr, k.length, v.length);
+			}
+			return sr.val;
+		}
+	}
+	
+	@Override
+	public boolean replace(byte[] k, byte[] prevVal, byte[] newVal) {
+		final long hash = Hash.murmurHash(k);
+		synchronized(lockForHash(hash)){
+			final SearchResult sr = locateRecord(k, hash);
+			if(Arrays.equals(sr.val, prevVal)){
+				//We could be optimistic and write this outside the lock.
+				final long dataPtr = writeKeyVal(k, newVal);
+				RecordPtr.overwrite(sr.foundMapper, sr.foundPos, hash, dataPtr, k.length, newVal.length);
+				return true;
+			}
+			return false;
+		}
+	}
+	
 	private long allocateSecondaryBucket(MMapper parentMapper, long parentBucketPos){
 		final long childBucketPos = allocateSecondary(bucketByteSize);
 		parentMapper.putLong(parentBucketPos, childBucketPos);
@@ -317,5 +360,74 @@ public class BucketDiskMap extends AbstractDiskMap {
 		secondaryMapper.putBytes(out, k);
 		secondaryMapper.putBytes(out + k.length, v);
 		return out;
+	}
+	
+	@Override
+	public Iterator<Map.Entry<byte[], byte[]>> iterator(){
+		return new Iterator<Map.Entry<byte[],byte[]>>() {
+			MMapper nextMapper;
+			long nextBucketIdx;
+			long nextBucketPos;
+			int nextSubIdx;
+			boolean finished;
+
+			{
+				finished = true;
+				nextMapper = primaryMapper;
+				nextBucketIdx = 0;
+				nextBucketPos = idxToPos(nextBucketIdx);
+				nextSubIdx = -1; //Necessary because we increment on first loop
+				advance();
+			}
+			
+			@Override
+			public boolean hasNext() { return !finished; }
+			private void advance(){
+				//Yes, this is ugly; we have to jump into the middle of a 3-nested
+				//loop.  Makes ya wish for coroutines.  firstItComplete tells us
+				//when we can start "from scratch" in a bucket in primary
+				boolean firstItComplete = false;
+				finished = true;
+				//Loops over all bucket chains in table
+				for(; nextBucketIdx<tableLength; nextBucketIdx++){
+					if(firstItComplete) {
+						nextMapper = primaryMapper;
+						nextBucketPos = idxToPos(nextBucketIdx);
+					}
+					//Loops over a chain of buckets
+					while(true){
+						//Loops over record pointers in bucket
+						//Can we avoid this conditional?
+						for(nextSubIdx = firstItComplete ? 0 : nextSubIdx+1
+								; nextSubIdx<recordsPerBucket
+								; nextSubIdx++){
+							final long subPos = subPosForSubIdx(nextBucketPos, nextSubIdx);
+							if(!new RecordPtr(nextMapper, subPos).isWritable()){
+								finished = false;
+								return;
+							}
+						}
+						firstItComplete = true;
+						nextBucketPos = getNextBucketPos(nextBucketPos, nextMapper);
+						if(nextBucketPos == 0) break;
+						else nextMapper = secondaryMapper;						
+					}
+				}
+			}
+			@Override
+			public Entry<byte[], byte[]> next() {
+				if(finished) throw new NoSuchElementException();
+				final long subPos = subPosForSubIdx(nextBucketPos, nextSubIdx);
+				final RecordPtr recPtr = new RecordPtr(nextMapper, subPos);
+				advance();
+				final byte[] k = recPtr.getKey(secondaryMapper);
+				final byte[] v = recPtr.getVal(secondaryMapper);
+				return new AbstractMap.SimpleEntry<byte[],byte[]>(k, v);
+			}
+			@Override
+			public void remove() {
+				throw new UnsupportedOperationException();
+			}
+		};
 	}
 }

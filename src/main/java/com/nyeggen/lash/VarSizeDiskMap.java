@@ -1,8 +1,13 @@
 package com.nyeggen.lash;
 
+import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NoSuchElementException;
 
 import com.nyeggen.lash.bucket.RecordChainNode;
 import com.nyeggen.lash.bucket.WritethruRecordChainNode;
@@ -189,6 +194,104 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 	}
 	
 	@Override
+	public boolean remove(byte[] k, byte[] v) {
+		final long hash = Hash.murmurHash(k);
+
+		synchronized(lockForHash(hash)){
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
+			final long adr = primaryMapper.getLong(pos);
+			if(adr == 0) return false;
+			
+			WritethruRecordChainNode bucket = getSecondaryRecord(adr);
+			WritethruRecordChainNode prev = null;
+			while(true){
+				if(bucket.keyEquals(hash, k) && Arrays.equals(v, bucket.getVal())) {
+					if(prev == null) primaryMapper.putLong(pos, bucket.getNextRecordPos());
+					else prev.setNextRecordPos(bucket.getNextRecordPos());
+					size.decrementAndGet();
+					return true;
+				}
+				else if(bucket.getNextRecordPos() != 0) {
+					prev = bucket;
+					bucket = getSecondaryRecord(bucket.getNextRecordPos());
+				}
+				else return false;
+			}
+		}
+	}
+	
+	@Override
+	public boolean replace(byte[] k, byte[] prevVal, byte[] newVal) {
+		final long hash = Hash.murmurHash(k);
+		final RecordChainNode toWriteBucket = new RecordChainNode(hash, k, newVal);
+		
+		synchronized(lockForHash(hash)){
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
+			
+			final long adr = primaryMapper.getLong(pos);
+			if(adr == 0) return false;
+			
+			WritethruRecordChainNode bucket = getSecondaryRecord(adr);
+			WritethruRecordChainNode prev = null;
+			while(true){
+				if(bucket.keyEquals(hash, k) && Arrays.equals(bucket.getVal(), prevVal)) {
+					final long insertPos = allocateForRecord(toWriteBucket);
+					toWriteBucket.setNextRecordPos(bucket.getNextRecordPos());
+					WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+					if(prev == null) {
+						primaryMapper.putLong(pos, insertPos);
+					} else {
+						prev.setNextRecordPos(insertPos);						
+					}
+					return true;
+				}
+				else if(bucket.getNextRecordPos() != 0) {
+					prev = bucket;
+					bucket = getSecondaryRecord(bucket.getNextRecordPos());
+				}
+				else return false;
+			}
+		}
+
+	}
+	@Override
+	public byte[] replace(byte[] k, byte[] v) {
+		final long hash = Hash.murmurHash(k);
+		final RecordChainNode toWriteBucket = new RecordChainNode(hash, k, v);
+		
+		synchronized(lockForHash(hash)){
+			final long idx = idxForHash(hash);
+			final long pos = idxToPos(idx);
+			
+			final long adr = primaryMapper.getLong(pos);
+			if(adr == 0) return null;
+			
+			WritethruRecordChainNode bucket = getSecondaryRecord(adr);
+			WritethruRecordChainNode prev = null;
+			while(true){
+				if(bucket.keyEquals(hash, k)) {
+					final long insertPos = allocateForRecord(toWriteBucket);
+					toWriteBucket.setNextRecordPos(bucket.getNextRecordPos());
+					WritethruRecordChainNode.writeRecord(toWriteBucket, secondaryMapper, insertPos);
+					if(prev == null) {
+						primaryMapper.putLong(pos, insertPos);
+					} else {
+						prev.setNextRecordPos(insertPos);						
+					}
+					return bucket.getVal();
+				}
+				else if(bucket.getNextRecordPos() != 0) {
+					prev = bucket;
+					bucket = getSecondaryRecord(bucket.getNextRecordPos());
+				}
+				else return null;
+			}
+		}
+	}
+	
+	@Override
 	protected void rehashIdx(long idx){
 		final ArrayList<WritethruRecordChainNode> keepBuckets = new ArrayList<WritethruRecordChainNode>();
 		final ArrayList<WritethruRecordChainNode> moveBuckets = new ArrayList<WritethruRecordChainNode>();
@@ -222,40 +325,57 @@ public class VarSizeDiskMap extends AbstractDiskMap {
 		}
 		return buckets.get(0).getPos();
 	}
-	
-	/**Incrementally run the supplied RecordProcessor on each record.  Locks
-	 * incrementally as well, so does not ensure total consistency unless you
-	 * synchronize externally - particularly given a rehash.*/
+		
+	/**We don't try to synchronize this, or even throw a 
+	 * ConcurrentModificationException.  You must synchronize externally.
+	 * However, by virtue of the way we rewrite data, you will receive data
+	 * that was at least valid at one time (ie, not bit-sliced & corrupted).*/
 	@Override
-	public void processAllRecords(RecordProcessor proc){
-		for(long idx = 0; idx < tableLength; idx++){
-			final long pos = idxToPos(idx);
-			synchronized(lockForHash(idx)){
-				final long adr = primaryMapper.getLong(pos);
-				if(adr == 0) continue;
-				WritethruRecordChainNode bucket = getSecondaryRecord(adr);
-				while(true){
-					if(!proc.process(bucket)) return;
-					if(bucket.getNextRecordPos() != 0) {
-						bucket = getSecondaryRecord(bucket.getNextRecordPos());
-					} else break;
+	public Iterator<Map.Entry<byte[], byte[]>> iterator(){
+		return new Iterator<Map.Entry<byte[],byte[]>>() {
+			long nextIdx, nextAddr;
+			boolean finished;
+			{
+				finished = true;
+				for(nextIdx = 0; nextIdx < tableLength; nextIdx++){
+					nextAddr = primaryMapper.getLong(idxToPos(nextIdx));
+					if(nextAddr == 0) continue;
+					else {
+						finished = false;
+						break;
+					} 
 				}
 			}
-		}
-	}
-	
-	/**Average size in bytes of written records. Requires scan, and incrementally
-	 * locks & unlocks each bucket - if you want total consistency you must synchronize
-	 * externally.*/
-	public double avgRecordSize(){
-		final AtomicLong recordCtr = new AtomicLong(0), recordSizeCtr = new AtomicLong(0);
-		processAllRecords(new RecordProcessor() {
-			public boolean process(RecordChainNode record) {
-				recordCtr.incrementAndGet();
-				recordSizeCtr.addAndGet(record.size());
-				return true;
+			private void advance(){
+				WritethruRecordChainNode bucket = getSecondaryRecord(nextAddr);
+				if(bucket.getNextRecordPos() != 0){
+					nextAddr = bucket.getNextRecordPos();
+					finished = false;
+					return;
+				}
+				for(nextIdx=nextIdx+1; nextIdx < tableLength; nextIdx++){
+					final long pos = idxToPos(nextIdx);
+					nextAddr = primaryMapper.getLong(pos);
+					if(nextAddr == 0) continue;
+					else {
+						finished = false;
+						return;
+					}
+				}
+				finished = true;
 			}
-		});
-		return recordSizeCtr.doubleValue() / recordCtr.doubleValue();
+			@Override
+			public boolean hasNext() { return !finished; }
+			@Override
+			public Entry<byte[], byte[]> next() {
+				if(finished) throw new NoSuchElementException();
+				final WritethruRecordChainNode node = getSecondaryRecord(nextAddr);
+				advance();
+				return new AbstractMap.SimpleEntry<byte[],byte[]>(node.getKey(), node.getVal());
+			}
+			/**This could potentially corrupt the map, not just return invalid data.*/
+			@Override
+			public void remove() { throw new UnsupportedOperationException(); }
+		};
 	}
 }
