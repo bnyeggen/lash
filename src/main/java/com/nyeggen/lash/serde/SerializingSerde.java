@@ -8,6 +8,8 @@ import java.io.ObjectOutput;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 
+/**You should expect this to be pretty slow / inefficient, but it is a good
+ * fallback implementation.*/
 public class SerializingSerde implements Serde<Serializable> {
 	@Override
 	public Serializable fromBytes(byte[] d) {

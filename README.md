@@ -14,6 +14,7 @@ See the source for implementation details.
 
 ROADMAP:
 
+- More tests!
 - Support for fixed-length records and fixed-key, variable-value records.  Refactor the Record & WritethruRecord classes to support them.
 - API for record -> record pointers to support multiple indexes over a primary map
 - Make more configurable, specifically for:
