@@ -10,12 +10,11 @@ For performance reasons, lash uses native byte order for storage of metadata lik
 
 lash uses mmap() heavily for storage access, which means that insertion performance is highly dependent on your system's tuning parameters (eg, sysctl's vm.dirty_background_ratio and vm.dirty_ratio).  It lurves RAM, but memory usage is managed by the operating system via the page cache and not the JVM.  For this reason it has excellent garbage collection performance and is nice for memory-constrained environments.  The random access inherent in hashmaps also means that you will be throwing a lot of random IOPs - SSDs are helpful.
 
-See Implementation.md, and of course the source, for implementation details.
+See the source for implementation details.
 
 ROADMAP:
 
 - Support for fixed-length records and fixed-key, variable-value records.  Refactor the Record & WritethruRecord classes to support them.
-- Serialization wrappers for using Java objects as keys and values
 - API for record -> record pointers to support multiple indexes over a primary map
 - Make more configurable, specifically for:
   - Lock striping
