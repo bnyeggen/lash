@@ -50,10 +50,8 @@ public class TestDiskMap {
 				break;
 			}
 		}
-		
-		for(final Integer i: dmap.keySet()){
-			assertEquals(dmap.get(i), hmap.get(i));
-		}
+
+		assertEquals(dmap, hmap);
 		backing.delete();
 	}
 }
