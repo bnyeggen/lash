@@ -32,6 +32,9 @@ public class RecordPtr{
 	public static RecordPtr writeDeleted(MMapper mapper, long pos){
 		return overwrite(mapper, pos, -1, -1, -1, -1);
 	}
+	public static RecordPtr writeFree(MMapper mapper, long pos){
+		return overwrite(mapper, pos, 0, 0, 0, 0);
+	}
 			
 	public boolean matchesData(long hash, int kLength){
 		return this.hash == hash && this.kLength == kLength;

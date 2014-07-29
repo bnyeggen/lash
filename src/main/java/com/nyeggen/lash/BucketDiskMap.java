@@ -58,8 +58,11 @@ public class BucketDiskMap extends AbstractDiskMap {
 	protected long subPosForSubIdx(long bucketPos, long subIdx){
 		return bucketPos + bucketHeaderSize + subIdx*recordSize;
 	}
-	protected long getNextBucketPos(long bucketPos, MMapper mapper){
+	protected static long getNextBucketPos(long bucketPos, MMapper mapper){
 		return mapper.getLong(bucketPos);
+	}
+	protected static void setNextBucketPos(long bucketPos, MMapper mapper, long val){
+		mapper.putLong(bucketPos, val);
 	}
 	
 	protected static class SearchResult {
@@ -199,9 +202,15 @@ public class BucketDiskMap extends AbstractDiskMap {
 			final RecordPtr recPtr = writeLayout[subIdx];
 			if(recPtr != null) {
 				recPtr.writeToPos(subPosForSubIdx(bucketPos, subIdx), mapper);
+			} else {
+				RecordPtr.writeFree(mapper, subPosForSubIdx(bucketPos, subIdx));
 			}
 		}
-		if(toWrite.size() <= recordsPerBucketTarget) return;
+		if(toWrite.size() <= recordsPerBucketTarget) {
+			//Nuke next bucket pos
+			setNextBucketPos(bucketPos, mapper, 0);
+			return;
+		}
 		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
 		if(nextBucketPos == 0){
 			nextBucketPos = allocateSecondaryBucket(mapper, bucketPos);
