@@ -236,7 +236,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 			for(final RecordPtr recPtr : allBuckets){
 				final long newIdx = recPtr.hash & (tableLength + tableLength - 1L);
 				if(newIdx == keepIdx) keepBuckets.add(recPtr);
-				else if (newIdx == moveIdx) keepBuckets.add(recPtr);
+				else if (newIdx == moveIdx) moveBuckets.add(recPtr);
 				else throw new IllegalStateException("Should rehash to idx or idx+tableLength");
 			}
 		}
