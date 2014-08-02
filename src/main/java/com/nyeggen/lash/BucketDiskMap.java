@@ -66,15 +66,15 @@ public class BucketDiskMap extends AbstractDiskMap {
 		//If we do not find k, and there are no free positions, we may only set the last
 		//bucket.
 		
-		/**MMapper in which the key was found, or null if it was not.*/
-		MMapper foundMapper = null;
-		/**Byte position at which the key was found, or -1 if it was not.*/
-		long foundPos = -1;
-		/**MMapper in which the first writable slot was found, or null if it was not.
-		 * This means that we insert to bucket capacity, not load target.*/
-		MMapper freeMapper = null;
-		/**Internal index at which there is a writable slot, or -1 if there is none.*/
-		long freePos = -1;
+		/**Bucket in which the key was found, or null if it was not.*/
+		BucketView foundBucket = null;
+		/**Bucket sub-index at which the key was found, or -1 if it was not.*/
+		int foundSubIdx = -1;
+		/**Bucket in which the first writable slot was found, or null if it was not.
+		 * We insert to bucket capacity, not load target.*/
+		BucketView freeBucket = null;
+		/**Bucket sub-index at which there is a writable slot, or -1 if there is none.*/
+		int freeSubIdx = -1;
 		/**The final bucket in the searched chain, or null if we found the key.*/
 		BucketView lastBucket;
 		/**The val associated with the supplied key, or null if there was none.*/
@@ -106,23 +106,21 @@ public class BucketDiskMap extends AbstractDiskMap {
 	
 	/**Used for rehashing. Splits data into groups of at max recordsPerBucketTarget.
 	 * If data is empty, returns the equivalent of [[]]*/
-	private static List<ArrayList<RecordPtr>> splitToBuckets(List<RecordPtr> data){
-		final ArrayList<ArrayList<RecordPtr>> out = new ArrayList<ArrayList<RecordPtr>>();
+	private static List<List<RecordPtr>> splitToBuckets(List<RecordPtr> data){
+		final List<List<RecordPtr>> out = new ArrayList<List<RecordPtr>>();
 		if(data.size() == 0) {
 			out.add(new ArrayList<RecordPtr>(0));
-		}
-		for(int i=0; i<data.size(); i+= recordsPerBucketTarget){
-			final ArrayList<RecordPtr> these = new ArrayList<RecordPtr>(recordsPerBucketTarget);
-			for(int j=0; j<recordsPerBucketTarget && j+i<data.size(); j++){
-				these.add(data.get(j+i));
-			}
+		} else if(data.size() <= recordsPerBucketTarget){
+			out.add(data);
+		} else for(int i=0; i<data.size(); i+= recordsPerBucketTarget){
+			final List<RecordPtr> these = data.subList(i, Math.min(i+recordsPerBucketTarget, data.size()));
 			out.add(these);
 		}
 		return out;
 	}
 
 	private void overwriteChain(BucketView bucket, List<RecordPtr> ptrs){
-		final Iterator<ArrayList<RecordPtr>> it = splitToBuckets(ptrs).iterator();
+		final Iterator<List<RecordPtr>> it = splitToBuckets(ptrs).iterator();
 		while(it.hasNext()){
 			final List<RecordPtr> sublist = it.next();
 			bucket.overwritePointers(sublist);
@@ -185,12 +183,13 @@ public class BucketDiskMap extends AbstractDiskMap {
 		final long dataPtr = writeKeyVal(k, v);
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
+			final RecordPtr toWrite = new RecordPtr(hash, dataPtr, k.length, v.length);
 			if(sr.val != null){
 				//Overwrite existing
-				RecordPtr.overwrite(sr.foundMapper, sr.foundPos, hash, dataPtr, k.length, v.length);
-			} else if(sr.freeMapper != null){
+				sr.foundBucket.writeRecord(toWrite, sr.foundSubIdx);
+			} else if(sr.freeBucket != null){
 				//Write new, in the free position
-				RecordPtr.overwrite(sr.freeMapper, sr.freePos, hash, dataPtr, k.length, v.length);
+				sr.freeBucket.writeRecord(toWrite, sr.freeSubIdx);
 				size.incrementAndGet();
 			} else {
 				//Write new, in a new bucket
@@ -211,10 +210,11 @@ public class BucketDiskMap extends AbstractDiskMap {
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
 			if(sr.val != null) return sr.val;
-			else if(sr.freeMapper != null){
+			else if(sr.freeBucket != null){
 				//Write new, in the free position
 				final long dataPtr = writeKeyVal(k, v);
-				RecordPtr.overwrite(sr.freeMapper, sr.freePos, hash, dataPtr, k.length, v.length);
+				final RecordPtr recPtr = new RecordPtr(hash, dataPtr, k.length, v.length);
+				sr.freeBucket.writeRecord(recPtr, sr.freeSubIdx);
 				size.incrementAndGet();
 			} else {
 				//Write new, in a new bucket
@@ -233,7 +233,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
 			if(sr.val != null){
-				RecordPtr.writeDeleted(sr.foundMapper, sr.foundPos);
+				sr.foundBucket.writeRecord(RecordPtr.DELETED, sr.foundSubIdx);
 				size.decrementAndGet();
 			}
 			return sr.val;
@@ -246,7 +246,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
 			if(Arrays.equals(sr.val, v)){
-				RecordPtr.writeDeleted(sr.foundMapper, sr.foundPos);
+				sr.foundBucket.writeRecord(RecordPtr.DELETED, sr.foundSubIdx);
 				size.decrementAndGet();
 				return true;
 			}
@@ -262,7 +262,8 @@ public class BucketDiskMap extends AbstractDiskMap {
 			if(sr.val != null){
 				//We could be optimistic and write this outside the lock.
 				final long dataPtr = writeKeyVal(k, v);
-				RecordPtr.overwrite(sr.foundMapper, sr.foundPos, hash, dataPtr, k.length, v.length);
+				final RecordPtr toWrite = new RecordPtr(hash, dataPtr, k.length, v.length);
+				sr.foundBucket.writeRecord(toWrite, sr.foundSubIdx);
 			}
 			return sr.val;
 		}
@@ -276,7 +277,8 @@ public class BucketDiskMap extends AbstractDiskMap {
 			if(Arrays.equals(sr.val, prevVal)){
 				//We could be optimistic and write this outside the lock.
 				final long dataPtr = writeKeyVal(k, newVal);
-				RecordPtr.overwrite(sr.foundMapper, sr.foundPos, hash, dataPtr, k.length, newVal.length);
+				final RecordPtr toWrite = new RecordPtr(hash, dataPtr, k.length, newVal.length);
+				sr.foundBucket.writeRecord(toWrite, sr.foundSubIdx);
 				return true;
 			}
 			return false;
@@ -402,21 +404,21 @@ public class BucketDiskMap extends AbstractDiskMap {
 					final byte[] prospectiveV = getValIfMatch(recPtr, k);
 					if(prospectiveV != null){
 						out.val = prospectiveV;
-						out.foundMapper = mapper;
-						out.foundPos = subPos;
+						out.foundBucket = this;
+						out.foundSubIdx = subIdx;
 						return true;
 					}
 					else continue;
 				} else if(recPtr.isFree()){
-					if(out.freeMapper == null){
-						out.freeMapper = mapper;
-						out.freePos = subPos;
+					if(out.freeBucket == null){
+						out.freeBucket = this;
+						out.freeSubIdx = subIdx;
 					}
 					break;
 				} else if (recPtr.isDeleted()){
-					if(out.freeMapper == null){
-						out.freeMapper = mapper;
-						out.freePos = subPos;
+					if(out.freeBucket == null){
+						out.freeBucket = this;
+						out.freeSubIdx = subIdx;
 					}
 					continue;
 				} else {
@@ -432,6 +434,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 			final Long prospective = freeSecondaryBuckets.poll();
 			if(prospective != null) nextBucketPos = prospective.longValue();
 			else nextBucketPos = BucketDiskMap.this.allocateSecondary(bucketByteSize);
+			setNextBucketPos(nextBucketPos);
 			return nextBucket();
 		}
 		
