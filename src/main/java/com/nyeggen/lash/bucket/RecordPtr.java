@@ -5,6 +5,8 @@ import com.nyeggen.lash.util.MMapper;
 public class RecordPtr{
 	public final long hash, dataPtr;
 	public final int kLength, vLength;
+	public static final RecordPtr DELETED = new RecordPtr(-1, -1, -1, -1);
+	
 	public RecordPtr(long hash, long dataPtr, int kLength, int vLength){
 		this.hash = hash;
 		this.dataPtr = dataPtr;
