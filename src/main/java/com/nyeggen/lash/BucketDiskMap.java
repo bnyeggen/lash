@@ -6,8 +6,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.nyeggen.lash.bucket.RecordPtr;
 import com.nyeggen.lash.util.Hash;
@@ -15,7 +15,8 @@ import com.nyeggen.lash.util.MMapper;
 
 /**Each bucket is a multi-record mini-hash table that stores multiple pointers
  * into secondary.  If a bucket overflows, we chain to a second bucket of
- * pointers stored in secondary.*/
+ * pointers stored in secondary.
+ * This is a work-in-progress; still debugging some correctness issues*/
 public class BucketDiskMap extends AbstractDiskMap {
 
 	protected final static int bucketByteSize = 4096;
@@ -23,6 +24,9 @@ public class BucketDiskMap extends AbstractDiskMap {
 	protected final static int recordSize = 24;
 	protected final static int recordsPerBucket = 170; // 4096 / 24 + 16;
 	protected final static int recordsPerBucketTarget = 128; // ~0.75 load factor
+
+	//Alternately, we could store a pointer to a "free chain" in the header.
+	protected final ConcurrentLinkedQueue<Long> freeSecondaryBuckets = new ConcurrentLinkedQueue<>();
 	
 	public BucketDiskMap(String baseFolderLoc){
 		this(baseFolderLoc, 0);
@@ -47,22 +51,14 @@ public class BucketDiskMap extends AbstractDiskMap {
 			secondaryLock.readLock().unlock();
 		}
 	}
+	
+	@Override
+	public double load() {
+		return super.load() / recordsPerBucket;
+	}
 
 	protected long idxToPos(long idx){
 		return idx * bucketByteSize;
-	}
-	/**Returns position between 0 and recordsPerBucket, based on top bits*/
-	protected int subIdxForHash(long hash){
-		return (int)((hash >>> (Long.numberOfLeadingZeros(recordsPerBucket) - 1)) % recordsPerBucket);
-	}
-	protected long subPosForSubIdx(long bucketPos, long subIdx){
-		return bucketPos + bucketHeaderSize + subIdx*recordSize;
-	}
-	protected static long getNextBucketPos(long bucketPos, MMapper mapper){
-		return mapper.getLong(bucketPos);
-	}
-	protected static void setNextBucketPos(long bucketPos, MMapper mapper, long val){
-		mapper.putLong(bucketPos, val);
 	}
 	
 	protected static class SearchResult {
@@ -74,148 +70,78 @@ public class BucketDiskMap extends AbstractDiskMap {
 		MMapper foundMapper = null;
 		/**Byte position at which the key was found, or -1 if it was not.*/
 		long foundPos = -1;
-		/**MMapper in which the first writable slot was found, or null if it was not.*/
+		/**MMapper in which the first writable slot was found, or null if it was not.
+		 * This means that we insert to bucket capacity, not load target.*/
 		MMapper freeMapper = null;
-		/**Byte position at which there is a writable slot, or null if there is none.*/
+		/**Internal index at which there is a writable slot, or -1 if there is none.*/
 		long freePos = -1;
-		/**MMapper containing the last bucket in the chain, or null if it was not located.*/
-		MMapper lastBucketMapper = null;
-		/**Position of the last bucket in the chain, or -1 if it was not located.*/
-		long lastBucketPos = -1;
+		/**The final bucket in the searched chain, or null if we found the key.*/
+		BucketView lastBucket;
 		/**The val associated with the supplied key, or null if there was none.*/
 		byte[] val = null;
 	}
 	
 	private byte[] getValIfMatch(RecordPtr recPtr, byte[] k){
-		final byte[] prospectiveK = new byte[k.length];
-		final byte[] prospectiveV = new byte[recPtr.vLength];
-		final long dataPtr = recPtr.dataPtr;
-		secondaryMapper.getBytes(dataPtr, prospectiveK);
-		secondaryMapper.getBytes(dataPtr + k.length, prospectiveV);
-		return Arrays.equals(prospectiveK, k) ? prospectiveV : null;
+		final byte[] prospectiveK = recPtr.getKey(secondaryMapper);
+		return Arrays.equals(prospectiveK, k) ? recPtr.getVal(secondaryMapper) : null;
 	}
-	
-	/**@param mapper The mapper in which to search
-	 * @param hash The hash of the key to be searched for
-	 * @param k The key to be searched for
-	 * @param bucketPos The byte position of the bucket to be searched
-	 * @param startSubIdx The index within the bucket at which to start searching
-	 * @param out The search results to be mutated
-	 * @return Whether or not the value was found*/
-	private boolean findInBucket(MMapper mapper, long hash, byte[] k, long bucketPos, int startSubIdx, SearchResult out){
-		for(int offset = 0; offset < recordsPerBucket; offset++){
-			final int subIdx = (startSubIdx + offset) % recordsPerBucket;
-			final long subPos = subPosForSubIdx(bucketPos, subIdx);
-			
-			final RecordPtr recPtr = new RecordPtr(mapper, subPos);
-			
-			if(recPtr.matchesData(hash, k.length)){
-				//Check for "real" match
-				final byte[] prospectiveV = getValIfMatch(recPtr, k);
-				if(prospectiveV != null){
-					out.val = prospectiveV;
-					out.foundMapper = mapper;
-					out.foundPos = subPos;
-					return true;
-				}
-				else continue;
-			} else if(recPtr.isFree()){
-				if(out.freeMapper == null){
-					out.freeMapper = mapper;
-					out.freePos = subPos;
-				}
-				break;
-			} else if (recPtr.isDeleted()){
-				if(out.freeMapper == null){
-					out.freeMapper = mapper;
-					out.freePos = subPos;
-				}
-				continue;
-			} else {
-				//Mismatched non-writable key.  Keep traversing bucket
-				continue;
-			}
-		}
-		return false;
-	}
-	
+		
 	private SearchResult locateRecord(byte[] k, long hash){
 		final SearchResult out = new SearchResult();
 		final long idx = idxForHash(hash);
-		final int startSubIdx = subIdxForHash(hash);
-		
-		MMapper mapper = primaryMapper;
-
-		long bucketPos = idxToPos(idx);
-		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
-		
-		if(findInBucket(mapper, hash, k, bucketPos, startSubIdx, out)) 
-			return out;
+		BucketView bucket = new BucketView(idx);
 		
 		//Chain to next bucket
-		while(nextBucketPos != 0){
-			mapper = secondaryMapper;
-			bucketPos = nextBucketPos;
-			nextBucketPos = getNextBucketPos(bucketPos, mapper);
-			if(findInBucket(mapper, hash, k, bucketPos, startSubIdx, out))
+		while(true){
+			if(bucket.findInBucket(hash, k, out)){
 				return out;
-		}
-		//Not found.  Record last bucket.
-		out.lastBucketMapper = mapper;
-		out.lastBucketPos = bucketPos;
-		return out;
-	}
-
-	/**Accumulates a list of RecordPtrs in that bucket, and any of its child buckets.*/
-	private void accumRecordsInBucketChain(long bucketPos, MMapper mapper, List<RecordPtr> accum){
-		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
-		for(int subIdx=0; subIdx<recordsPerBucket; subIdx++){
-			final long subPos = subPosForSubIdx(bucketPos, subIdx);
-			final RecordPtr recPtr = new RecordPtr(mapper, subPos);
-			if(!recPtr.isWritable()){
-				accum.add(recPtr);
 			}
-		}
-		if(nextBucketPos != 0){
-			accumRecordsInBucketChain(nextBucketPos, secondaryMapper, accum);
+			final BucketView nextBucket = bucket.nextBucket();
+			if(nextBucket == null){
+				out.lastBucket = bucket;
+				return out;
+			} else bucket = nextBucket;
 		}
 	}
 	
-	/**Overwrites the given bucket with the supplied records, attempting to maintain
-	 * load, overwriting down to child buckets, and allocating if necessary*/
-	private void writeRecordsToBucketChain(long bucketPos, MMapper mapper, List<RecordPtr> toWrite){
-		final RecordPtr[] writeLayout = new RecordPtr[recordsPerBucket];
-		final List<RecordPtr> subList = toWrite.subList(0, Math.min(toWrite.size(), recordsPerBucketTarget));
-		
-		for(final RecordPtr recPtr : subList){
-			int subIdx = subIdxForHash(recPtr.hash);
-			for(int offset=0; offset<recordsPerBucket; offset++){
-				if(writeLayout[subIdx] == null) {
-					writeLayout[subIdx] = recPtr;
-					break;					
-				}
-				subIdx = (subIdx + 1) % recordsPerBucket;
+	/**Used for rehashing. Splits data into groups of at max recordsPerBucketTarget.
+	 * If data is empty, returns the equivalent of [[]]*/
+	private static List<ArrayList<RecordPtr>> splitToBuckets(List<RecordPtr> data){
+		final ArrayList<ArrayList<RecordPtr>> out = new ArrayList<ArrayList<RecordPtr>>();
+		if(data.size() == 0) {
+			out.add(new ArrayList<RecordPtr>(0));
+		}
+		for(int i=0; i<data.size(); i+= recordsPerBucketTarget){
+			final ArrayList<RecordPtr> these = new ArrayList<RecordPtr>(recordsPerBucketTarget);
+			for(int j=0; j<recordsPerBucketTarget && j+i<data.size(); j++){
+				these.add(data.get(j+i));
 			}
+			out.add(these);
 		}
+		return out;
+	}
+
+	private void overwriteChain(BucketView bucket, List<RecordPtr> ptrs){
+		final Iterator<ArrayList<RecordPtr>> it = splitToBuckets(ptrs).iterator();
+		while(it.hasNext()){
+			final List<RecordPtr> sublist = it.next();
+			bucket.overwritePointers(sublist);
+			if(it.hasNext()){
+				if (bucket.nextBucket() == null) bucket = bucket.allocateNextBucket();
+				else bucket = bucket.nextBucket();
+			} else break;
+		}
+		final BucketView endBucket = bucket;
 		
-		for(int subIdx = 0; subIdx < recordsPerBucket; subIdx++){
-			final RecordPtr recPtr = writeLayout[subIdx];
-			if(recPtr != null) {
-				recPtr.writeToPos(subPosForSubIdx(bucketPos, subIdx), mapper);
-			} else {
-				RecordPtr.writeFree(mapper, subPosForSubIdx(bucketPos, subIdx));
-			}
+		//Add tail to the free list
+		bucket = bucket.nextBucket();
+		while(bucket != null){
+			final BucketView nextBucket = bucket.nextBucket();
+			bucket.clearAll();
+			freeSecondaryBuckets.add(bucket.pos);
+			bucket = nextBucket;
 		}
-		if(toWrite.size() <= recordsPerBucketTarget) {
-			//Nuke next bucket pos
-			setNextBucketPos(bucketPos, mapper, 0);
-			return;
-		}
-		long nextBucketPos = getNextBucketPos(bucketPos, mapper);
-		if(nextBucketPos == 0){
-			nextBucketPos = allocateSecondaryBucket(mapper, bucketPos);
-		}
-		writeRecordsToBucketChain(nextBucketPos, secondaryMapper, toWrite.subList(recordsPerBucketTarget, toWrite.size()));
+		endBucket.setNextBucketPos(0);
 	}
 	
 	@Override
@@ -225,24 +151,21 @@ public class BucketDiskMap extends AbstractDiskMap {
 		final ArrayList<RecordPtr> keepBuckets = new ArrayList<RecordPtr>();
 		final ArrayList<RecordPtr> moveBuckets = new ArrayList<RecordPtr>();
 
-		long keepBucketPos = idxToPos(idx);
-		long moveBucketPos = idxToPos(moveIdx);
-
 		//Accumulate all the old pointer records
 		{
-			final ArrayList<RecordPtr> allBuckets  = new ArrayList<RecordPtr>();
-			accumRecordsInBucketChain(keepBucketPos, primaryMapper, allBuckets);
+			final BucketView keepBucket = new BucketView(keepIdx);
+			final List<RecordPtr> allBuckets = keepBucket.getAllPointersInChain();
 			//And filter
 			for(final RecordPtr recPtr : allBuckets){
 				final long newIdx = recPtr.hash & (tableLength + tableLength - 1L);
 				if(newIdx == keepIdx) keepBuckets.add(recPtr);
-				else if (newIdx == moveIdx) keepBuckets.add(recPtr);
+				else if (newIdx == moveIdx) moveBuckets.add(recPtr);
 				else throw new IllegalStateException("Should rehash to idx or idx+tableLength");
 			}
 		}
 		
-		writeRecordsToBucketChain(keepBucketPos, primaryMapper, keepBuckets);
-		writeRecordsToBucketChain(moveBucketPos, primaryMapper, moveBuckets);
+		overwriteChain(new BucketView(keepIdx), keepBuckets);
+		overwriteChain(new BucketView(moveIdx), moveBuckets);
 	}
 
 	@Override
@@ -253,9 +176,11 @@ public class BucketDiskMap extends AbstractDiskMap {
 			return sr.val;
 		}
 	}
-
+	
 	@Override
 	public byte[] put(byte[] k, byte[] v) {
+		if(load() > loadRehashThreshold) rehash();
+		
 		final long hash = Hash.murmurHash(k);
 		final long dataPtr = writeKeyVal(k, v);
 		synchronized(lockForHash(hash)){
@@ -270,8 +195,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 			} else {
 				//Write new, in a new bucket
 				final RecordPtr recPtr = new RecordPtr(hash, dataPtr, k.length, v.length);
-				final long bucketPos = allocateSecondaryBucket(sr.lastBucketMapper, sr.lastBucketPos);
-				writeRecordsToBucketChain(bucketPos, secondaryMapper, Arrays.asList(new RecordPtr[]{recPtr}));
+				sr.lastBucket.allocateNextBucket().writeRecord(recPtr);
 				size.incrementAndGet();
 			}
 			return sr.val;
@@ -280,11 +204,13 @@ public class BucketDiskMap extends AbstractDiskMap {
 
 	@Override
 	public byte[] putIfAbsent(byte[] k, byte[] v) {
+		if(load() > loadRehashThreshold) rehash();
+		
 		final long hash = Hash.murmurHash(k);
 		
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
-			if(sr.val != null){}
+			if(sr.val != null) return sr.val;
 			else if(sr.freeMapper != null){
 				//Write new, in the free position
 				final long dataPtr = writeKeyVal(k, v);
@@ -294,8 +220,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 				//Write new, in a new bucket
 				final long dataPtr = writeKeyVal(k, v);
 				final RecordPtr recPtr = new RecordPtr(hash, dataPtr, k.length, v.length);
-				final long bucketPos = allocateSecondaryBucket(sr.lastBucketMapper, sr.lastBucketPos);
-				writeRecordsToBucketChain(bucketPos, sr.lastBucketMapper, Arrays.asList(new RecordPtr[]{recPtr}));
+				sr.lastBucket.allocateNextBucket().writeRecord(recPtr);
 				size.incrementAndGet();
 			}
 			return sr.val;
@@ -358,12 +283,6 @@ public class BucketDiskMap extends AbstractDiskMap {
 		}
 	}
 	
-	private long allocateSecondaryBucket(MMapper parentMapper, long parentBucketPos){
-		final long childBucketPos = allocateSecondary(bucketByteSize);
-		parentMapper.putLong(parentBucketPos, childBucketPos);
-		return childBucketPos;
-	}
-		
 	private long writeKeyVal(byte[] k, byte[] v){
 		final long out = allocateSecondary(k.length + v.length);
 		secondaryMapper.putBytes(out, k);
@@ -371,72 +290,186 @@ public class BucketDiskMap extends AbstractDiskMap {
 		return out;
 	}
 	
+	//Redo this by storing array of pointers, loading next
+	//chain when needed, and keeping track of position in chain.
 	@Override
 	public Iterator<Map.Entry<byte[], byte[]>> iterator(){
 		return new Iterator<Map.Entry<byte[],byte[]>>() {
-			MMapper nextMapper;
-			long nextBucketIdx;
-			long nextBucketPos;
-			int nextSubIdx;
-			boolean finished;
-
+			BucketView nextBucket = new BucketView(0);
+			int nextIdx = 0, nextSubIdx = -1;
 			{
-				finished = true;
-				nextMapper = primaryMapper;
-				nextBucketIdx = 0;
-				nextBucketPos = idxToPos(nextBucketIdx);
-				nextSubIdx = -1; //Necessary because we increment on first loop
 				advance();
 			}
-			
-			@Override
-			public boolean hasNext() { return !finished; }
 			private void advance(){
-				//Yes, this is ugly; we have to jump into the middle of a 3-nested
-				//loop.  Makes ya wish for coroutines.  firstItComplete tells us
-				//when we can start "from scratch" in a bucket in primary
-				boolean firstItComplete = false;
-				finished = true;
-				//Loops over all bucket chains in table
-				for(; nextBucketIdx<tableLength; nextBucketIdx++){
-					if(firstItComplete) {
-						nextMapper = primaryMapper;
-						nextBucketPos = idxToPos(nextBucketIdx);
-					}
-					//Loops over a chain of buckets
-					while(true){
-						//Loops over record pointers in bucket
-						//Can we avoid this conditional?
-						for(nextSubIdx = firstItComplete ? 0 : nextSubIdx+1
-								; nextSubIdx<recordsPerBucket
-								; nextSubIdx++){
-							final long subPos = subPosForSubIdx(nextBucketPos, nextSubIdx);
-							if(!new RecordPtr(nextMapper, subPos).isWritable()){
-								finished = false;
-								return;
-							}
+				for(; nextIdx < tableLength; ){
+					for(; nextBucket != null; nextBucket = nextBucket.nextBucket()){
+						for(nextSubIdx = nextSubIdx+1; nextSubIdx < recordsPerBucket; nextSubIdx++){
+							if(!nextBucket.getPointer(nextSubIdx).isWritable()) return;
 						}
-						firstItComplete = true;
-						nextBucketPos = getNextBucketPos(nextBucketPos, nextMapper);
-						if(nextBucketPos == 0) break;
-						else nextMapper = secondaryMapper;						
+						nextSubIdx = 0;
 					}
+					nextBucket = (++nextIdx < tableLength) ? new BucketView(nextIdx) : null;
 				}
 			}
 			@Override
+			public boolean hasNext() {
+				return nextBucket != null;
+			}
+			@Override
 			public Entry<byte[], byte[]> next() {
-				if(finished) throw new NoSuchElementException();
-				final long subPos = subPosForSubIdx(nextBucketPos, nextSubIdx);
-				final RecordPtr recPtr = new RecordPtr(nextMapper, subPos);
-				advance();
-				final byte[] k = recPtr.getKey(secondaryMapper);
-				final byte[] v = recPtr.getVal(secondaryMapper);
-				return new AbstractMap.SimpleEntry<byte[],byte[]>(k, v);
+				final RecordPtr ptr = nextBucket.getPointer(nextSubIdx);
+				final byte[] k = ptr.getKey(secondaryMapper);
+				final byte[] v = ptr.getVal(secondaryMapper);
+				return new AbstractMap.SimpleImmutableEntry<byte[], byte[]>(k, v);
 			}
 			@Override
 			public void remove() {
 				throw new UnsupportedOperationException();
 			}
 		};
+	}
+	
+	/**Returns position between 0 and recordsPerBucket, based on top bits*/
+	protected static int subIdxForHash(long hash){
+		return (int)((hash >>> (Long.numberOfLeadingZeros(recordsPerBucket) - 1)) % recordsPerBucket);
+	}
+	/**Absolute position of the nth record in the bucket at the given pos*/
+	protected static long subPosForSubIdx(long bucketPos, long subIdx){
+		return bucketPos + bucketHeaderSize + subIdx*recordSize;
+	}
+	
+	//Hopefully this can help with data corruption by bounding writes.
+	protected class BucketView {
+		final long idx, pos;
+		final MMapper mapper;
+		long nextBucketPos = -1;
+		
+		private BucketView(long idx, long pos, MMapper mapper){
+			this.idx = idx;
+			this.pos = pos;
+			this.mapper = mapper;
+		}
+		
+		/**Zeroes the entire bucket.*/
+		public void clearAll(){
+			mapper.putBytes(pos, new byte[bucketByteSize]);
+		}
+		
+		/**Clears all embedded RecordPtrs, retaining header*/
+		public void clearEntries(){
+			mapper.putBytes(pos+bucketHeaderSize, new byte[bucketByteSize-bucketHeaderSize]);
+		}
+		
+		//For primary.
+		public BucketView(long idx){
+			this(idx, idxToPos(idx), primaryMapper);
+		}
+		
+		public BucketView nextBucket(){
+			if(nextBucketPos == -1) loadNextBucketPos();
+			if(nextBucketPos == 0) return null;
+			return new BucketView(this.idx, nextBucketPos, secondaryMapper);
+		}
+		
+		public void writeRecord(RecordPtr ptr){
+			int subIdx = subIdxForHash(ptr.hash);
+			for(int offset=0; offset<recordsPerBucket; offset++){
+				final long subPos = subPosForSubIdx(pos, subIdx);
+				if(RecordPtr.writableAt(mapper, subPos)){
+					ptr.writeToPos(subPos, mapper);
+					return;
+				}
+				subIdx = (subIdx+1) % recordsPerBucket;
+			}
+			throw new IllegalStateException("Writing to full bucket");
+		}
+		
+		public void writeRecord(RecordPtr ptr, int subIdx){
+			final long writePos = subPosForSubIdx(pos, subIdx);
+			ptr.writeToPos(writePos, mapper);
+		}
+				
+		public boolean findInBucket(long hash, byte[] k, SearchResult out){
+			final int startSubIdx = subIdxForHash(hash);
+			for(int offset = 0; offset < recordsPerBucket; offset++){
+				final int subIdx = (startSubIdx + offset) % recordsPerBucket;
+				final long subPos = subPosForSubIdx(pos, subIdx);
+				
+				final RecordPtr recPtr = new RecordPtr(mapper, subPos);
+				
+				if(recPtr.matchesData(hash, k.length)){
+					//Check for "real" match
+					final byte[] prospectiveV = getValIfMatch(recPtr, k);
+					if(prospectiveV != null){
+						out.val = prospectiveV;
+						out.foundMapper = mapper;
+						out.foundPos = subPos;
+						return true;
+					}
+					else continue;
+				} else if(recPtr.isFree()){
+					if(out.freeMapper == null){
+						out.freeMapper = mapper;
+						out.freePos = subPos;
+					}
+					break;
+				} else if (recPtr.isDeleted()){
+					if(out.freeMapper == null){
+						out.freeMapper = mapper;
+						out.freePos = subPos;
+					}
+					continue;
+				} else {
+					//Mismatched non-writable key.  Keep traversing bucket
+					continue;
+				}
+			}
+			return false;
+		}
+		
+		public BucketView allocateNextBucket(){
+			if(nextBucketPos != 0) throw new IllegalStateException();
+			final Long prospective = freeSecondaryBuckets.poll();
+			if(prospective != null) nextBucketPos = prospective.longValue();
+			else nextBucketPos = BucketDiskMap.this.allocateSecondary(bucketByteSize);
+			return nextBucket();
+		}
+		
+		public RecordPtr getPointer(int subIdx){
+			final long subPos = subPosForSubIdx(pos, subIdx);
+			return new RecordPtr(mapper, subPos);
+		}
+		
+		public void getAllPointers(List<RecordPtr> accum){
+			for(int i=0; i<recordsPerBucket; i++){
+				final RecordPtr recPtr = getPointer(i);
+				if(!recPtr.isWritable()) accum.add(recPtr);
+			}
+		}
+		public List<RecordPtr> getAllPointersInChain(){
+			final ArrayList<RecordPtr> out = new ArrayList<>();
+			getAllPointers(out);
+			BucketView child = this.nextBucket();
+			while(child != null){
+				child.getAllPointers(out);
+				child = child.nextBucket();
+			}
+			return out;
+		}
+		
+		public void overwritePointers(List<RecordPtr> ptrs){
+			if(ptrs.size() > recordsPerBucket) 
+				throw new IllegalArgumentException("Number of pointers over capacity");
+			clearEntries();
+			for(final RecordPtr recPtr : ptrs) writeRecord(recPtr);
+		}
+				
+		private void loadNextBucketPos(){
+			nextBucketPos = mapper.getLong(pos);
+		}
+		public void setNextBucketPos(long v){
+			nextBucketPos = v;
+			mapper.putLong(pos, v);
+		}
 	}
 }
