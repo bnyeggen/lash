@@ -118,14 +118,23 @@ public class TestBucketDiskMap {
 				collisions[idx] = Hash.findCollision(collisions[idx-1], 16);
 			}
 			
-			for(final long i : collisions){
-				dmap.put(InsertHelper.longToBytes(i), InsertHelper.longToBytes(i+1));
+			for(int i=0; i<collisions.length; i++){
+				final long v = collisions[i]+1;
+				final byte[] kBytes = InsertHelper.longToBytes(collisions[i]);
+				final byte[] vBytes = InsertHelper.longToBytes(v);
+				dmap.put(kBytes, vBytes);
+				final byte[] vOutBytes = dmap.get(kBytes);
+				final long vOut = InsertHelper.bytesToLong(vOutBytes);
+				
+				assertEquals("Insert/retrieval failure on index " + i, v, vOut);
 			}
 			for(int idx=0; idx<collisions.length; idx++){
 				final long i = collisions[idx];
+				final byte[] k = InsertHelper.longToBytes(i);
+				final byte[] v = dmap.get(k);
 				assertEquals("Unexpected inequality on index " + idx + "."
 					, i+1
-					, InsertHelper.bytesToLong(dmap.get(InsertHelper.longToBytes(i))));
+					, InsertHelper.bytesToLong(v));
 			}
 		} finally {
 			dmap.close();
