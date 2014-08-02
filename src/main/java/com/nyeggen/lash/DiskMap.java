@@ -229,7 +229,7 @@ public class DiskMap<K,V> implements ConcurrentMap<K, V> {
 					final Map.Entry<byte[], byte[]> e = backingIt.next();
 					final K k = keySerde.fromBytes(e.getKey());
 					final V v = valSerde.fromBytes(e.getValue());
-					return new AbstractMap.SimpleEntry<K,V>(k, v);
+					return new AbstractMap.SimpleImmutableEntry<K,V>(k, v);
 				}
 				@Override
 				public void remove() { backingIt.remove(); }
