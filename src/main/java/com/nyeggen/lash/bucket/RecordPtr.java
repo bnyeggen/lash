@@ -25,6 +25,12 @@ public class RecordPtr{
 		return new RecordPtr(hash, dataPtr, kLength, vLength);	
 	}
 	
+	/**Returns true if the record at the given pos is writable.*/
+	public static boolean writableAt(MMapper mapper, long pos){
+		final long v = mapper.getLong(pos + 8);
+		return v == 0 || v == -1;
+	}
+	
 	public RecordPtr writeToPos(final long pos, final MMapper mapper){
 		return overwrite(mapper, pos, hash, dataPtr, kLength, vLength);
 	}
