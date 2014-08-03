@@ -15,8 +15,7 @@ import com.nyeggen.lash.util.MMapper;
 
 /**Each bucket is a multi-record mini-hash table that stores multiple pointers
  * into secondary.  If a bucket overflows, we chain to a second bucket of
- * pointers stored in secondary.
- * This is a work-in-progress; still debugging some correctness issues*/
+ * pointers stored in secondary.*/
 public class BucketDiskMap extends AbstractDiskMap {
 
 	protected final static int bucketByteSize = 4096;
@@ -25,6 +24,9 @@ public class BucketDiskMap extends AbstractDiskMap {
 	protected final static int recordsPerBucket = 170; // 4096 / 24 + 16;
 	protected final static int recordsPerBucketTarget = 128; // ~0.75 load factor
 
+	//When we split a bucket chain, the "old" position typically loses half its
+	//buckets.  They are cleared and recorded here so we can re-use them instead
+	//of allocating additional buckets.
 	//Alternately, we could store a pointer to a "free chain" in the header.
 	protected final ConcurrentLinkedQueue<Long> freeSecondaryBuckets = new ConcurrentLinkedQueue<>();
 	
@@ -61,11 +63,12 @@ public class BucketDiskMap extends AbstractDiskMap {
 		return idx * bucketByteSize;
 	}
 	
+	/**Represents the result of a search in a bucket chain for a particular
+	 * key.  If the search was successful, we do not need to record the
+	 * information about free positions or the last bucket in the chain.
+	 * If we do not find the key, and there are no free positions, we may
+	 * only set the last bucket information.*/
 	protected static class SearchResult {
-		//If finding is successful, we do not need to find the free position or last bucket.
-		//If we do not find k, and there are no free positions, we may only set the last
-		//bucket.
-		
 		/**Bucket in which the key was found, or null if it was not.*/
 		BucketView foundBucket = null;
 		/**Bucket sub-index at which the key was found, or -1 if it was not.*/
@@ -85,7 +88,8 @@ public class BucketDiskMap extends AbstractDiskMap {
 		final byte[] prospectiveK = recPtr.getKey(secondaryMapper);
 		return Arrays.equals(prospectiveK, k) ? recPtr.getVal(secondaryMapper) : null;
 	}
-		
+	
+	/**Runs a search over all buckets in a chain.*/
 	private SearchResult locateRecord(byte[] k, long hash){
 		final SearchResult out = new SearchResult();
 		final long idx = idxForHash(hash);
@@ -105,7 +109,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 	}
 	
 	/**Used for rehashing. Splits data into groups of at max recordsPerBucketTarget.
-	 * If data is empty, returns the equivalent of [[]]*/
+	 * If data is empty, returns the List equivalent of [[]]*/
 	private static List<List<RecordPtr>> splitToBuckets(List<RecordPtr> data){
 		final List<List<RecordPtr>> out = new ArrayList<List<RecordPtr>>();
 		if(data.size() == 0) {
@@ -119,6 +123,9 @@ public class BucketDiskMap extends AbstractDiskMap {
 		return out;
 	}
 
+	/**Overwrites the existing contents of the bucket chain starting at bucket
+	 * with the given record pointers.  If there are "left over" buckets, they
+	 * are added to the free list.*/
 	private void overwriteChain(BucketView bucket, List<RecordPtr> ptrs){
 		final Iterator<List<RecordPtr>> it = splitToBuckets(ptrs).iterator();
 		while(it.hasNext()){
@@ -292,8 +299,6 @@ public class BucketDiskMap extends AbstractDiskMap {
 		return out;
 	}
 	
-	//Redo this by storing array of pointers, loading next
-	//chain when needed, and keeping track of position in chain.
 	@Override
 	public Iterator<Map.Entry<byte[], byte[]>> iterator(){
 		return new Iterator<Map.Entry<byte[],byte[]>>() {
@@ -340,7 +345,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 		return bucketPos + bucketHeaderSize + subIdx*recordSize;
 	}
 	
-	//Hopefully this can help with data corruption by bounding writes.
+	/**Object corresponding to a particular bucket.*/
 	protected class BucketView {
 		final long idx, pos;
 		final MMapper mapper;
@@ -367,12 +372,15 @@ public class BucketDiskMap extends AbstractDiskMap {
 			this(idx, idxToPos(idx), primaryMapper);
 		}
 		
+		/**Returns the next bucket in the chain, or null if there is none.*/
 		public BucketView nextBucket(){
 			if(nextBucketPos == -1) loadNextBucketPos();
 			if(nextBucketPos == 0) return null;
 			return new BucketView(this.idx, nextBucketPos, secondaryMapper);
 		}
 		
+		/**Inserts the given record at the optimal position in the bucket.
+		 * Throws IllegalStateException if you insert into a full bucket.*/
 		public void writeRecord(RecordPtr ptr){
 			int subIdx = subIdxForHash(ptr.hash);
 			for(int offset=0; offset<recordsPerBucket; offset++){
@@ -386,11 +394,15 @@ public class BucketDiskMap extends AbstractDiskMap {
 			throw new IllegalStateException("Writing to full bucket");
 		}
 		
+		/**Writes the given record pointer to the given index in the bucket.
+		 * Overwrites existing data.*/
 		public void writeRecord(RecordPtr ptr, int subIdx){
 			final long writePos = subPosForSubIdx(pos, subIdx);
 			ptr.writeToPos(writePos, mapper);
 		}
-				
+		
+		/**Searches this bucket for the given key, mutating the given SearchResult
+		 * as needed, and returning true if it was found.*/
 		public boolean findInBucket(long hash, byte[] k, SearchResult out){
 			final int startSubIdx = subIdxForHash(hash);
 			for(int offset = 0; offset < recordsPerBucket; offset++){
@@ -429,6 +441,10 @@ public class BucketDiskMap extends AbstractDiskMap {
 			return false;
 		}
 		
+		/**Sets the nextBucketPos to a new empty bucket, either freshly
+		 * allocated from secondary or pulled from the free list.
+		 * Calling this on a bucket with an existing valid next bucket throws
+		 * an IllegalStateException.*/
 		public BucketView allocateNextBucket(){
 			if(nextBucketPos != 0) throw new IllegalStateException();
 			final Long prospective = freeSecondaryBuckets.poll();
@@ -438,17 +454,22 @@ public class BucketDiskMap extends AbstractDiskMap {
 			return nextBucket();
 		}
 		
+		/**Returns the (possibly free or deleted) record pointer at the given
+		 * index in this bucket.*/
 		public RecordPtr getPointer(int subIdx){
 			final long subPos = subPosForSubIdx(pos, subIdx);
 			return new RecordPtr(mapper, subPos);
 		}
 		
-		public void getAllPointers(List<RecordPtr> accum){
+		/**Adds all valid RecordPtrs in this bucket to the given list.*/
+		private void getAllPointers(List<RecordPtr> accum){
 			for(int i=0; i<recordsPerBucket; i++){
 				final RecordPtr recPtr = getPointer(i);
 				if(!recPtr.isWritable()) accum.add(recPtr);
 			}
 		}
+		
+		/**Returns a List containing all valid RecordPtrs in this chain.*/
 		public List<RecordPtr> getAllPointersInChain(){
 			final ArrayList<RecordPtr> out = new ArrayList<>();
 			getAllPointers(out);
@@ -460,6 +481,10 @@ public class BucketDiskMap extends AbstractDiskMap {
 			return out;
 		}
 		
+		/**Removes all existing RecordPtrs from this bucket, and populates with
+		 * those in the passed list.  Throws IllegalArgumentException if the
+		 * passed list contains too many to write.  Removes all existing pointers
+		 * even if the passed list is empty.*/
 		public void overwritePointers(List<RecordPtr> ptrs){
 			if(ptrs.size() > recordsPerBucket) 
 				throw new IllegalArgumentException("Number of pointers over capacity");

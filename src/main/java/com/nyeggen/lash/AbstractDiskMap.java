@@ -36,7 +36,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Number of buckets in the table, always a power of 2.*/
 	long tableLength;
 	
-	//Denotes the index of the next stripe to be rehashed
+	/**Index of the next stripe to be rehashed*/
 	final AtomicLong rehashComplete = new AtomicLong(0);
 	
 	public AbstractDiskMap(String baseFolderLoc, long primaryFileLen){
@@ -61,12 +61,11 @@ public abstract class AbstractDiskMap implements Closeable {
 		}
 	}
 		
-	/**Should only be called in constructor. Loads table metadata from the secondary, or
-	 * initializes to default state if metadata is blank.
-	 * Attempting to read a header from a different subclass of DiskMap will cause
-	 * undefined behavior, corruption, and bad times.*/
+	/**Should only be called in constructor. Loads table metadata from the
+	 * secondary, or initializes to default state if metadata is blank.*/
 	protected abstract void readHeader();
 
+	/**Size of the header (stored in the first part of the secondary file).*/
 	protected long getHeaderSize() { return 32; }
 
 	/**Embeds table metadata in the secondary to enable persistent tables.
@@ -83,29 +82,30 @@ public abstract class AbstractDiskMap implements Closeable {
 		}
 	}
 	
-
-	
 	protected static long nextPowerOf2(long i){
 		if(i < (1<<28)) return (1<<28);
 		if((i & (i-1))==0) return i;
 		return (1 << (64 - (Long.numberOfLeadingZeros(i))));
 	}
-
 	
+	/**Returns the lock for the stripe for the given hash.  Synchronize of this
+	 * object before mutating the map.*/
 	protected Object lockForHash(long hash){
 		return locks[(int)(hash & (nLocks - 1))];	
 	}
 	
-	//This doesn't lock - because it depends on tableLength, callers should
-	//establish some lock that precludes a full rehash (read or write lock on
-	//any of the locks).
+	/**Returns the bucket index for the given hash.
+	 * This doesn't lock - because it depends on tableLength, callers should
+	 * establish some lock that precludes a full rehash (read or write lock on
+	 * any of the locks). */
 	protected long idxForHash(long hash){
 		return (hash & (nLocks - 1)) < rehashComplete.get()
 				? hash & (tableLength + tableLength - 1) 
 				: hash & (tableLength - 1);
 	}
 	
-	//Recursively locks all available locks
+	/**Recursively locks all stripes, and doubles the size of the primary mapper.
+	 * On Linux your filesystem probably makes this expansion a sparse operation.*/
 	protected void completeExpansion(int idx){
 		if(idx == nLocks){
 			try {
@@ -206,7 +206,10 @@ public abstract class AbstractDiskMap implements Closeable {
 			}
 		}
 	}
-	/**Removes all entries from the map.*/
+	/**Removes all entries from the map, zeroing the primary file and marking
+	 * the current position in the secondary as immediately after the header.
+	 * Data is not actually removed from the secondary, but it will be
+	 * overwritten on subsequent writes.*/
 	public void clear(){ clear(0); }
 	
 	/**Writes all header metadata and unmaps the backing mmap'd files.*/
@@ -232,7 +235,8 @@ public abstract class AbstractDiskMap implements Closeable {
 		return size.get();
 	}
 	
-	/**Average number of records per bucket. O(1).*/
+	/**"Fullness" of the table.  Some implementations may wish to override this
+	 * to account for multiple records per bucket.*/
 	public double load(){
 		return size.doubleValue() / (tableLength + (tableLength/nLocks)*rehashComplete.get());
 	}
@@ -250,12 +254,22 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Remove the record associated with the given key, returning the previous value, or
 	 * null if there was none.*/
 	public abstract byte[] remove(byte[] k);
-	
+
+	/**Remove the given key if it is currently mapped to the given value.
+	 * Returns true if successful.*/
 	public abstract boolean remove(byte[] k, byte[] v);
+	/**Replace the value associated with the given key with the given value, if
+	 * there was an existing value.
+	 * Returns the previously associated value, or null if there was none.*/
 	public abstract byte[] replace(byte[] k, byte[] v);
+	/**If the given k is currently associated with prevVal, replace it with
+	 * newVal.  Returns true if successful.*/
 	public abstract boolean replace(byte[] k, byte[] prevVal, byte[] newVal);
+	/**Returns true if the given key is mapped in the table.*/
 	public boolean containsKey(byte[] k){
 		return get(k) != null;
 	};
+	/**Returns an iterator over key-value pairs.  Neither the returned iterator
+	 * nor the Map.Entry values iterated over support mutation.*/
 	public abstract Iterator<Map.Entry<byte[],byte[]>> iterator();
 }
