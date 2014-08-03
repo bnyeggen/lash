@@ -4,6 +4,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public class LongSerde implements Serde<Long> {
+	private LongSerde(){}
+	private static final LongSerde inst = new LongSerde();
+	public static LongSerde getInstance(){ return inst; }
+
 	@Override
 	public Long fromBytes(byte[] b) {
 		if (b == null || b.length == 0) return null;
@@ -19,6 +23,4 @@ public class LongSerde implements Serde<Long> {
 		buf.putLong(t);
 		return buf.array();
 	}
-	private static final LongSerde inst = new LongSerde();
-	public static LongSerde getInstance(){ return inst; }
 }

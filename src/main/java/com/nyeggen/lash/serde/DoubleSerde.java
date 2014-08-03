@@ -4,6 +4,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public class DoubleSerde implements Serde<Double> {
+	private DoubleSerde(){}
+	private static final DoubleSerde instance = new DoubleSerde();
+	public static DoubleSerde getInstance(){ return instance; }
+
 	@Override
 	public Double fromBytes(byte[] b) {
 		if (b == null || b.length == 0) return null;
@@ -19,6 +23,4 @@ public class DoubleSerde implements Serde<Double> {
 		buf.putDouble(t);
 		return buf.array();
 	}
-	private static final DoubleSerde instance = new DoubleSerde();
-	public static DoubleSerde getInstance(){ return instance; }
 }

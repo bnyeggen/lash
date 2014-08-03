@@ -11,6 +11,10 @@ import java.io.Serializable;
 /**You should expect this to be pretty slow / inefficient, but it is a good
  * fallback implementation.*/
 public class SerializingSerde implements Serde<Serializable> {
+	private SerializingSerde(){}
+	private static final SerializingSerde inst = new SerializingSerde();
+	public static SerializingSerde getInstance(){ return inst; }
+	
 	@Override
 	public Serializable fromBytes(byte[] d) {
 		final ByteArrayInputStream bis = new ByteArrayInputStream(d);

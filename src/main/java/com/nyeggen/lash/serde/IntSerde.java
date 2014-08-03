@@ -4,6 +4,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public class IntSerde implements Serde<Integer>{
+	private IntSerde(){}
+	private static final IntSerde inst = new IntSerde();
+	public static IntSerde getInstance(){ return inst; }
+
 	@Override
 	public Integer fromBytes(byte[] b) {
 		if (b == null || b.length == 0) return null;
@@ -19,6 +23,4 @@ public class IntSerde implements Serde<Integer>{
 		buf.putInt(t);
 		return buf.array();
 	}
-	private static final IntSerde inst = new IntSerde();
-	public static IntSerde getInstance(){ return inst; }
 }
