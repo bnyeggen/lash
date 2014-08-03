@@ -157,16 +157,24 @@ public class MMapper implements Closeable{
 	/**After Java 7, this is a built-in.  We put it here so it's available
 	 * for testing.*/
 	public static File createTempDir() {
-		  File baseDir = new File(System.getProperty("java.io.tmpdir"));
-		  String baseName = System.currentTimeMillis() + "-";
+		File baseDir = new File(System.getProperty("java.io.tmpdir"));
+		String baseName = System.currentTimeMillis() + "-";
 
-		  for (int counter = 0; counter < 1024; counter++) {
-		    File tempDir = new File(baseDir, baseName + counter);
-		    if (tempDir.mkdir()) {
-		      return tempDir;
-		    }
-		  }
-		  throw new IllegalStateException("Failed to create directory within "
-		      + 1024 + " attempts (tried "
-		      + baseName + "0 to " + baseName + (1024 - 1) + ')');
-		}}
+		for (int counter = 0; counter < 1024; counter++) {
+			File tempDir = new File(baseDir, baseName + counter);
+			if (tempDir.mkdir()) {
+				return tempDir;
+			}
+		}
+		throw new IllegalStateException("Failed to create directory within "
+				+ 1024 + " attempts (tried " + baseName + "0 to " + baseName
+				+ (1024 - 1) + ')');
+	}
+	
+	public static Unsafe getUnsafe(){
+		return unsafe;
+	}
+	public static int getByteArrayOffset(){
+		return BYTE_ARRAY_OFFSET;
+	}
+}
