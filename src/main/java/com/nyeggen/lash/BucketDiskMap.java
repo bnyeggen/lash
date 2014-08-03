@@ -28,7 +28,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 	//buckets.  They are cleared and recorded here so we can re-use them instead
 	//of allocating additional buckets.
 	//Alternately, we could store a pointer to a "free chain" in the header.
-	protected final ConcurrentLinkedQueue<Long> freeSecondaryBuckets = new ConcurrentLinkedQueue<>();
+	protected final ConcurrentLinkedQueue<Long> freeSecondaryBuckets = new ConcurrentLinkedQueue<Long>();
 	
 	public BucketDiskMap(String baseFolderLoc){
 		this(baseFolderLoc, 0);
@@ -471,7 +471,7 @@ public class BucketDiskMap extends AbstractDiskMap {
 		
 		/**Returns a List containing all valid RecordPtrs in this chain.*/
 		public List<RecordPtr> getAllPointersInChain(){
-			final ArrayList<RecordPtr> out = new ArrayList<>();
+			final ArrayList<RecordPtr> out = new ArrayList<RecordPtr>();
 			getAllPointers(out);
 			BucketView child = this.nextBucket();
 			while(child != null){
