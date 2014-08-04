@@ -11,7 +11,6 @@ import java.nio.channels.FileChannel;
 import sun.nio.ch.FileChannelImpl;
 import sun.misc.Unsafe;
 
-//Finished, basically.
 @SuppressWarnings("restriction")
 public class MMapper implements Closeable{
 
@@ -19,6 +18,9 @@ public class MMapper implements Closeable{
 	private static final Method mmap;
 	private static final Method unmmap;
 	private static final int BYTE_ARRAY_OFFSET;
+	private static final int DOUBLE_ARRAY_OFFSET;
+	private static final int INT_ARRAY_OFFSET;
+	private static final int LONG_ARRAY_OFFSET;
 
 	private long addr, size;
 	private final String loc;
@@ -33,6 +35,9 @@ public class MMapper implements Closeable{
 			unmmap = getMethod(FileChannelImpl.class, "unmap0", long.class, long.class);
 
 			BYTE_ARRAY_OFFSET = unsafe.arrayBaseOffset(byte[].class);
+			DOUBLE_ARRAY_OFFSET = unsafe.arrayBaseOffset(double[].class);
+			INT_ARRAY_OFFSET = unsafe.arrayBaseOffset(int[].class);
+			LONG_ARRAY_OFFSET = unsafe.arrayBaseOffset(long[].class);
 		} catch (Exception e){
 			throw new RuntimeException(e);
 		}
@@ -174,7 +179,16 @@ public class MMapper implements Closeable{
 	public static Unsafe getUnsafe(){
 		return unsafe;
 	}
-	public static int getByteArrayOffset(){
+	public static long getByteArrayOffset(){
 		return BYTE_ARRAY_OFFSET;
+	}
+	public static long getDoubleArrayOffset(){
+		return DOUBLE_ARRAY_OFFSET;
+	}
+	public static long getIntArrayOffset(){
+		return INT_ARRAY_OFFSET;
+	}
+	public static long getLongArrayOffset(){
+		return LONG_ARRAY_OFFSET;
 	}
 }
