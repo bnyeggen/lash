@@ -1,8 +1,8 @@
 package com.nyeggen.lash.serde;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import com.nyeggen.lash.util.MMapper;
 
+@SuppressWarnings("restriction")
 public class LongSerde implements Serde<Long> {
 	private LongSerde(){}
 	private static final LongSerde inst = new LongSerde();
@@ -11,16 +11,13 @@ public class LongSerde implements Serde<Long> {
 	@Override
 	public Long fromBytes(byte[] b) {
 		if (b == null || b.length == 0) return null;
-		final ByteBuffer buf = ByteBuffer.wrap(b);
-		buf.order(ByteOrder.nativeOrder());
-		return buf.getLong();
+		return MMapper.getUnsafe().getLong(b, MMapper.getByteArrayOffset());
 	}
 	@Override
 	public byte[] toBytes(Long t) {
 		if(t == null) return new byte[]{};
-		final ByteBuffer buf = ByteBuffer.allocate(8);
-		buf.order(ByteOrder.nativeOrder());
-		buf.putLong(t);
-		return buf.array();
+		final byte[] out = new byte[8];
+		MMapper.getUnsafe().putLong(out, MMapper.getByteArrayOffset(), t.longValue());
+		return out;
 	}
 }

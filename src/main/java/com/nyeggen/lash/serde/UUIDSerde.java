@@ -1,9 +1,10 @@
 package com.nyeggen.lash.serde;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.UUID;
 
+import com.nyeggen.lash.util.MMapper;
+
+@SuppressWarnings("restriction")
 public class UUIDSerde implements Serde<UUID> {
 	private UUIDSerde(){}
 	private static final UUIDSerde inst = new UUIDSerde();
@@ -11,16 +12,23 @@ public class UUIDSerde implements Serde<UUID> {
 	
 	@Override
 	public UUID fromBytes(byte[] d) {
-		final ByteBuffer buf = ByteBuffer.wrap(d);
-		buf.order(ByteOrder.nativeOrder());
-		return new UUID(buf.getLong(), buf.getLong());
+		if(d == null || d.length == 0) return null;
+		final long baos = MMapper.getByteArrayOffset();
+		final long mostSig = MMapper.getUnsafe().getLong(d, baos);
+		final long leastSig = MMapper.getUnsafe().getLong(d, baos+8);
+		return new UUID(mostSig, leastSig);
 	}
 	@Override
 	public byte[] toBytes(UUID t) {
-		final ByteBuffer buf = ByteBuffer.allocate(16);
-		return buf.putLong(t.getMostSignificantBits())
-				.putLong(t.getLeastSignificantBits())
-				.array();
+		if(t == null) return new byte[]{};
+		final long baos = MMapper.getByteArrayOffset();
+		final long mostSig = t.getMostSignificantBits();
+		final long leastSig = t.getLeastSignificantBits();
+		final byte[] out = new byte[16];
+		
+		MMapper.getUnsafe().putLong(out, baos, mostSig);
+		MMapper.getUnsafe().putLong(out, baos+8, leastSig);
+
+		return out;
 	}
-	
 }
