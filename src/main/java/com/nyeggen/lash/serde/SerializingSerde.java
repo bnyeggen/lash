@@ -11,23 +11,23 @@ import java.io.Serializable;
 /**You should expect this to be pretty slow / inefficient, but it is a good
  * fallback implementation.*/
 public class SerializingSerde implements Serde<Serializable> {
-	private SerializingSerde(){}
+	private SerializingSerde() {}
 	private static final SerializingSerde inst = new SerializingSerde();
-	public static SerializingSerde getInstance(){ return inst; }
-	
+	public static SerializingSerde getInstance() { return inst; }
+
 	@Override
 	public Serializable fromBytes(byte[] d) {
 		final ByteArrayInputStream bis = new ByteArrayInputStream(d);
 		ObjectInput in = null;
 		try {
-		  in = new ObjectInputStream(bis);
-		  return (Serializable)in.readObject();
-		} catch(Exception e){
+			in = new ObjectInputStream(bis);
+			return (Serializable) in.readObject();
+		} catch (Exception e) {
 			throw new RuntimeException(e);
 		} finally {
 			try {
 				bis.close();
-			} catch (Exception e){
+			} catch (Exception e) {
 				throw new RuntimeException(e);
 			}
 		}
