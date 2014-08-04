@@ -8,7 +8,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import com.nyeggen.lash.AbstractDiskMap;
+import com.nyeggen.lash.ADiskMap;
 import com.nyeggen.lash.BucketDiskMap;
 import com.nyeggen.lash.util.Hash;
 import com.nyeggen.lash.util.MMapper;
@@ -20,7 +20,7 @@ public class TestBucketDiskMap {
 	public void testConcurrentInserts() throws Exception {
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
-		final AbstractDiskMap dmap = new BucketDiskMap(dir);
+		final ADiskMap dmap = new BucketDiskMap(dir);
 		final int recsPerThread = 2000000;
 		try {
 			final Thread t1 = new Thread(new Runnable() {
@@ -81,7 +81,7 @@ public class TestBucketDiskMap {
 	public void testInserts() throws Exception{
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
-		final AbstractDiskMap dmap = new BucketDiskMap(dir);
+		final ADiskMap dmap = new BucketDiskMap(dir);
 		final int recs = 8000000;
 		try {
 			for(long i=0; i<recs; i++){
@@ -110,7 +110,7 @@ public class TestBucketDiskMap {
 	public void testHashCollisions() throws Exception {
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
-		final AbstractDiskMap dmap = new BucketDiskMap(dir);
+		final ADiskMap dmap = new BucketDiskMap(dir);
 		try {
 			final long[] collisions = new long[500];
 			collisions[0] = 1;

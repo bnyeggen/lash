@@ -9,7 +9,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import com.nyeggen.lash.AbstractDiskMap;
+import com.nyeggen.lash.ADiskMap;
 import com.nyeggen.lash.BucketDiskMap;
 import com.nyeggen.lash.DiskMap;
 import com.nyeggen.lash.serde.IntSerde;
@@ -21,7 +21,7 @@ public class TestDiskMap {
 	public void testSerdes() throws Exception{
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
-		final AbstractDiskMap backing = new BucketDiskMap(dir);
+		final ADiskMap backing = new BucketDiskMap(dir);
 		final DiskMap<Integer, Integer> dmap = new DiskMap<Integer, Integer>(IntSerde.getInstance(), IntSerde.getInstance(), backing);
 		
 		final ConcurrentHashMap<Integer, Integer> hmap = new ConcurrentHashMap<Integer, Integer>();

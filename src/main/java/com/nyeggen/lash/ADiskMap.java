@@ -3,14 +3,14 @@ package com.nyeggen.lash;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.nyeggen.lash.util.MMapper;
 
-public abstract class AbstractDiskMap implements Closeable {
+/**Abstract base class usable by implementations that wish to share the same
+ * primary/secondary, lock-by-stripe approach.*/
+public abstract class ADiskMap implements Closeable, IDiskMap {
 	/**Number of lock stripes. Always a power of 2*/
 	static final int nLocks = 256;
 	/**We attempt to keep load below this value.*/
@@ -39,7 +39,7 @@ public abstract class AbstractDiskMap implements Closeable {
 	/**Index of the next stripe to be rehashed*/
 	final AtomicLong rehashComplete = new AtomicLong(0);
 	
-	public AbstractDiskMap(String baseFolderLoc, long primaryFileLen){
+	public ADiskMap(String baseFolderLoc, long primaryFileLen){
 		try {
 			final File baseFolder = new File(baseFolderLoc);
 			baseFolder.mkdirs();
@@ -230,7 +230,7 @@ public abstract class AbstractDiskMap implements Closeable {
 		new File(this.baseFolderLoc).delete();
 	}
 	
-	/**Number of inserted records.  O(1).*/
+	@Override
 	public long size(){
 		return size.get();
 	}
@@ -240,36 +240,8 @@ public abstract class AbstractDiskMap implements Closeable {
 	public double load(){
 		return size.doubleValue() / (tableLength + (tableLength/nLocks)*rehashComplete.get());
 	}
-	
-	/**Returns the value corresponding to the given key, or null if it is not
-	 * present.  Zero-width values (ie, a hash set) are supported.*/
-	public abstract byte[] get(byte[] k);
-	/**Inserts the given record in the map, and returns the previous value associated
-	 * with the given key, or null if there was none.*/
-	public abstract byte[] put(byte[] k, byte[] v);
-	/**Inserts the given record in the map, only if there was no previous value associated
-	 * with the key.  Returns null in the case of a successful insertion, or the value
-	 * previously (and currently) associated with the map.*/
-	public abstract byte[] putIfAbsent(byte[] k, byte[] v);
-	/**Remove the record associated with the given key, returning the previous value, or
-	 * null if there was none.*/
-	public abstract byte[] remove(byte[] k);
-
-	/**Remove the given key if it is currently mapped to the given value.
-	 * Returns true if successful.*/
-	public abstract boolean remove(byte[] k, byte[] v);
-	/**Replace the value associated with the given key with the given value, if
-	 * there was an existing value.
-	 * Returns the previously associated value, or null if there was none.*/
-	public abstract byte[] replace(byte[] k, byte[] v);
-	/**If the given k is currently associated with prevVal, replace it with
-	 * newVal.  Returns true if successful.*/
-	public abstract boolean replace(byte[] k, byte[] prevVal, byte[] newVal);
-	/**Returns true if the given key is mapped in the table.*/
+	@Override
 	public boolean containsKey(byte[] k){
 		return get(k) != null;
 	};
-	/**Returns an iterator over key-value pairs.  Neither the returned iterator
-	 * nor the Map.Entry values iterated over support mutation.*/
-	public abstract Iterator<Map.Entry<byte[],byte[]>> iterator();
 }

@@ -16,7 +16,7 @@ import com.nyeggen.lash.util.MMapper;
 /**Each bucket is a multi-record mini-hash table that stores multiple pointers
  * into secondary.  If a bucket overflows, we chain to a second bucket of
  * pointers stored in secondary.*/
-public class BucketDiskMap extends AbstractDiskMap {
+public class BucketDiskMap extends ADiskMap {
 
 	protected final static int bucketByteSize = 4096;
 	protected final static int bucketHeaderSize = 16;

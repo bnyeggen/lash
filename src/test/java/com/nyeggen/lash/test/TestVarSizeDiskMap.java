@@ -8,7 +8,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import com.nyeggen.lash.AbstractDiskMap;
+import com.nyeggen.lash.ADiskMap;
 import com.nyeggen.lash.VarSizeDiskMap;
 import com.nyeggen.lash.util.MMapper;
 import com.nyeggen.lash.util.InsertHelper;
@@ -20,7 +20,7 @@ public class TestVarSizeDiskMap {
 	public void testConcurrentInserts() throws Exception {
 		final File tmpDir = MMapper.createTempDir();
 		final String dir = tmpDir.getCanonicalPath();
-		final AbstractDiskMap dmap = new VarSizeDiskMap(dir, 0);
+		final ADiskMap dmap = new VarSizeDiskMap(dir, 0);
 		final int recsPerThread = 750000;
 		try {
 			final Thread t1 = new Thread(new Runnable() {

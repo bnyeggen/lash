@@ -15,7 +15,7 @@ import com.nyeggen.lash.util.Hash;
 
 /**An implementation that stores "buckets" consisting of single-record pointers,
  * which are chained on collision in a secondary file where data is also stored.*/
-public class VarSizeDiskMap extends AbstractDiskMap {
+public class VarSizeDiskMap extends ADiskMap {
 
 	private static final int PRIMARY_REC_SIZE = 8;
 	

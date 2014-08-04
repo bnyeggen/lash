@@ -14,11 +14,11 @@ import com.nyeggen.lash.serde.Serde;
 
 @SuppressWarnings("unchecked")
 public class DiskMap<K,V> implements ConcurrentMap<K, V> {
-	private final AbstractDiskMap backingMap;
+	private final IDiskMap backingMap;
 	private final Serde<K> keySerde;
 	private final Serde<V> valSerde;
 	
-	public DiskMap(Serde<K> keySerde, Serde<V> valSerde, AbstractDiskMap backingMap){
+	public DiskMap(Serde<K> keySerde, Serde<V> valSerde, ADiskMap backingMap){
 		this.keySerde = keySerde;
 		this.valSerde = valSerde;
 		this.backingMap = backingMap;
@@ -198,7 +198,6 @@ public class DiskMap<K,V> implements ConcurrentMap<K, V> {
 					backingIt.remove();
 				}
 			};
-
 		}
 		@Override
 		public void clear() {
