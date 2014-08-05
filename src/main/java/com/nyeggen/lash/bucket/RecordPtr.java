@@ -19,14 +19,7 @@ public class RecordPtr{
 		kLength = mapper.getInt(pos + 16);
 		vLength = mapper.getInt(pos + 20);
 	}
-	public static RecordPtr overwrite(MMapper mapper, long pos, long hash, long dataPtr, int kLength, int vLength){
-		mapper.putLong(pos,  hash);
-		mapper.putLong(pos+8, dataPtr);
-		mapper.putInt(pos+16, kLength);
-		mapper.putInt(pos+20, vLength);
-		return new RecordPtr(hash, dataPtr, kLength, vLength);	
-	}
-	
+
 	/**Returns true if the record at the given pos is writable.*/
 	public static boolean writableAt(MMapper mapper, long pos){
 		final long v = mapper.getLong(pos + 8);
@@ -34,11 +27,15 @@ public class RecordPtr{
 	}
 	
 	public RecordPtr writeToPos(final long pos, final MMapper mapper){
-		return overwrite(mapper, pos, hash, dataPtr, kLength, vLength);
+		mapper.putLong(pos,  hash);
+		mapper.putLong(pos+8, dataPtr);
+		mapper.putInt(pos+16, kLength);
+		mapper.putInt(pos+20, vLength);
+		return new RecordPtr(hash, dataPtr, kLength, vLength);	
 	}
 	
-	public boolean matchesData(long hash, int kLength){
-		return this.hash == hash && this.kLength == kLength;
+	public boolean maybeMatches(long hash, byte[] k){
+		return this.hash == hash && this.kLength == k.length;
 	}
 	public boolean isWritable(){ return dataPtr == 0 || dataPtr == -1; }
 	public boolean isFree(){ return dataPtr == 0; }

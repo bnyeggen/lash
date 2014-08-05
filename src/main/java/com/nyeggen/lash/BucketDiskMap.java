@@ -411,7 +411,7 @@ public class BucketDiskMap extends ADiskMap {
 				
 				final RecordPtr recPtr = new RecordPtr(mapper, subPos);
 				
-				if(recPtr.matchesData(hash, k.length)){
+				if(recPtr.maybeMatches(hash, k)){
 					//Check for "real" match
 					final byte[] prospectiveV = getValIfMatch(recPtr, k);
 					if(prospectiveV != null){
