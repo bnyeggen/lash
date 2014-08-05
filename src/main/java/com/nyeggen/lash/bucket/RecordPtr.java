@@ -31,9 +31,10 @@ public class RecordPtr{
 		mapper.putLong(pos+8, dataPtr);
 		mapper.putInt(pos+16, kLength);
 		mapper.putInt(pos+20, vLength);
-		return new RecordPtr(hash, dataPtr, kLength, vLength);	
+		return this;
 	}
 	
+	/**Returns true if we cannot preclude a match based on locally stored data.*/
 	public boolean maybeMatches(long hash, byte[] k){
 		return this.hash == hash && this.kLength == k.length;
 	}
