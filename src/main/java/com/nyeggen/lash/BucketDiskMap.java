@@ -302,12 +302,14 @@ public class BucketDiskMap extends ADiskMap {
 	@Override
 	public Iterator<Map.Entry<byte[], byte[]>> iterator(){
 		return new Iterator<Map.Entry<byte[],byte[]>>() {
-			BucketView nextBucket = new BucketView(0);
-			int nextIdx = 0, nextSubIdx = -1;
+			BucketView nextBucket = new BucketView(0),
+			           prevBucket = null;
+			int nextIdx = 0, nextSubIdx = -1, prevSubIdx = -1;
 			{
 				advance();
 			}
 			private void advance(){
+				prevSubIdx = nextSubIdx; prevBucket = nextBucket;
 				for(; nextIdx < tableLength; ){
 					for(; nextBucket != null; nextBucket = nextBucket.nextBucket()){
 						for(nextSubIdx = nextSubIdx+1; nextSubIdx < recordsPerBucket; nextSubIdx++){
@@ -327,11 +329,13 @@ public class BucketDiskMap extends ADiskMap {
 				final RecordPtr ptr = nextBucket.getPointer(nextSubIdx);
 				final byte[] k = ptr.getKey(secondaryMapper);
 				final byte[] v = ptr.getVal(secondaryMapper);
+				advance();
 				return new AbstractMap.SimpleImmutableEntry<byte[], byte[]>(k, v);
 			}
 			@Override
 			public void remove() {
-				throw new UnsupportedOperationException();
+				if(prevBucket == null) throw new IllegalStateException();
+				prevBucket.writeRecord(RecordPtr.DELETED, prevSubIdx);
 			}
 		};
 	}
