@@ -1,6 +1,10 @@
 package com.nyeggen.lash.test;
 
 import java.io.File;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.Assert.assertEquals;
 
@@ -137,6 +141,45 @@ public class TestBucketDiskMap {
 					, InsertHelper.bytesToLong(v));
 			}
 		} finally {
+			dmap.close();
+			dmap.delete();
+		}
+	}
+	
+	@Test
+	public void testIteration() throws Exception {
+		final File tmpDir = MMapper.createTempDir();
+		final String dir = tmpDir.getCanonicalPath();
+		final ADiskMap dmap = new BucketDiskMap(dir);
+		final ConcurrentHashMap<Long, Long> m = new ConcurrentHashMap<Long, Long>(1000);
+		final Random rng = new Random();
+		try {
+			for(long k=0; k<100; k++){
+				final byte[] kBytes = InsertHelper.longToBytes(k);
+				final long v = rng.nextLong();
+				final byte[] vBytes = InsertHelper.longToBytes(v);
+				m.put(k, v);
+				dmap.put(kBytes, vBytes);
+			}
+			final Iterator<Map.Entry<byte[], byte[]>> it = dmap.iterator();
+			for(int i=0; i<100; i++){
+				final Map.Entry<byte[], byte[]> e = it.next();
+				final long k = InsertHelper.bytesToLong(e.getKey());
+				final long v = InsertHelper.bytesToLong(e.getValue());
+				//Does iterator value match what was inserted?
+				assertEquals(m.get(k).longValue(), v);
+				m.remove(k);
+				it.remove();
+			}
+			//Does iteration hit all elements, and no more?
+			assertEquals(false, it.hasNext());
+			assertEquals(true, m.isEmpty());
+			assertEquals(0, dmap.size());
+			for(long i=0; i<100; i++){
+				final byte[] kBytes = InsertHelper.longToBytes(i);
+				assertEquals(false, dmap.containsKey(kBytes));
+			}
+		} finally{
 			dmap.close();
 			dmap.delete();
 		}
