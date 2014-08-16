@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -310,14 +311,19 @@ public class BucketDiskMap extends ADiskMap {
 			}
 			private void advance(){
 				prevSubIdx = nextSubIdx; prevBucket = nextBucket;
-				for(; nextIdx < tableLength; ){
-					for(; nextBucket != null; nextBucket = nextBucket.nextBucket()){
-						for(nextSubIdx = nextSubIdx+1; nextSubIdx < recordsPerBucket; nextSubIdx++){
-							if(!nextBucket.getPointer(nextSubIdx).isWritable()) return;
-						}
+				
+				while(true){
+					nextSubIdx++;
+					if(nextSubIdx >= recordsPerBucket){
 						nextSubIdx = 0;
+						nextBucket = nextBucket.nextBucket();
 					}
-					nextBucket = (++nextIdx < tableLength) ? new BucketView(nextIdx) : null;
+					if(nextBucket == null){
+						nextIdx++;
+						if(nextIdx >= tableLength) return;
+						nextBucket = new BucketView(nextIdx);
+					}
+					if(!nextBucket.getPointer(nextSubIdx).isWritable()) return;
 				}
 			}
 			@Override
@@ -326,16 +332,18 @@ public class BucketDiskMap extends ADiskMap {
 			}
 			@Override
 			public Entry<byte[], byte[]> next() {
+				if(! hasNext()) throw new NoSuchElementException();
 				final RecordPtr ptr = nextBucket.getPointer(nextSubIdx);
 				final byte[] k = ptr.getKey(secondaryMapper);
 				final byte[] v = ptr.getVal(secondaryMapper);
-				advance();
+				if(hasNext()) advance();
 				return new AbstractMap.SimpleImmutableEntry<byte[], byte[]>(k, v);
 			}
 			@Override
 			public void remove() {
 				if(prevBucket == null) throw new IllegalStateException();
 				prevBucket.writeRecord(RecordPtr.DELETED, prevSubIdx);
+				BucketDiskMap.this.size.decrementAndGet();
 			}
 		};
 	}
