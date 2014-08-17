@@ -153,8 +153,9 @@ public class TestBucketDiskMap {
 		final ADiskMap dmap = new BucketDiskMap(dir);
 		final ConcurrentHashMap<Long, Long> m = new ConcurrentHashMap<Long, Long>(1000);
 		final Random rng = new Random();
+		final long nInserts = 1000;
 		try {
-			for(long k=0; k<100; k++){
+			for(long k=0; k<nInserts; k++){
 				final byte[] kBytes = InsertHelper.longToBytes(k);
 				final long v = rng.nextLong();
 				final byte[] vBytes = InsertHelper.longToBytes(v);
@@ -162,7 +163,7 @@ public class TestBucketDiskMap {
 				dmap.put(kBytes, vBytes);
 			}
 			final Iterator<Map.Entry<byte[], byte[]>> it = dmap.iterator();
-			for(int i=0; i<100; i++){
+			for(long i=0; i<nInserts; i++){
 				final Map.Entry<byte[], byte[]> e = it.next();
 				final long k = InsertHelper.bytesToLong(e.getKey());
 				final long v = InsertHelper.bytesToLong(e.getValue());
@@ -175,7 +176,7 @@ public class TestBucketDiskMap {
 			assertEquals(false, it.hasNext());
 			assertEquals(true, m.isEmpty());
 			assertEquals(0, dmap.size());
-			for(long i=0; i<100; i++){
+			for(long i=0; i<nInserts; i++){
 				final byte[] kBytes = InsertHelper.longToBytes(i);
 				assertEquals(false, dmap.containsKey(kBytes));
 			}
