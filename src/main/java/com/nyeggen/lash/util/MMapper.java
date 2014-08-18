@@ -129,6 +129,25 @@ public class MMapper implements Closeable{
 		if(pos>=size) throw new MMapIndexOOBException(pos);
 		unsafe.putByte(pos + addr, val);
 	}
+	
+	public void setBit(long bitN, boolean val){
+		final long bytePos = bitN >> 3;
+		if(bytePos>=size) throw new MMapIndexOOBException(bytePos);
+		final long bitBytePos = bitN & 7;
+		final byte curByte = unsafe.getByte(addr + bytePos);
+		final byte newByte = val 
+				? (byte)(curByte | (1 << bitBytePos))
+				: (byte)(curByte & ~(1 << bitBytePos));
+		unsafe.putByte(addr+bytePos, newByte);
+	}
+	
+	public boolean getBit(long bitN){
+		final long bytePos = bitN >> 3;
+		if(bytePos>=size) throw new MMapIndexOOBException(bytePos);
+		final long bitBytePos = bitN & 7;
+		final byte curByte = unsafe.getByte(addr + bytePos);
+		return (curByte & (1 << bitBytePos)) != 0;
+	}
 
 	public void putInt(long pos, int val){
 		if(pos+4>size) throw new MMapIndexOOBException(pos);
