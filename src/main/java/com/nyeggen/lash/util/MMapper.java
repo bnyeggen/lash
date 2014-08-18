@@ -22,7 +22,7 @@ public class MMapper implements Closeable{
 	private static final int INT_ARRAY_OFFSET;
 	private static final int LONG_ARRAY_OFFSET;
 
-	private long addr, size;
+	private long addr=0, size=0;
 	private final String loc;
 
 	static {
@@ -70,16 +70,24 @@ public class MMapper implements Closeable{
 	//Given that the location and size have been set, map that location
 	//for the given length and set this.addr to the returned offset
 	private void mapAndSetOffset() throws Exception{
-		final RandomAccessFile backingFile = new RandomAccessFile(this.loc, "rw");
-		backingFile.setLength(this.size);
+		if(loc == null){
+			addr = (addr == 0) ? allocateDirect(size) : reAllocateDirect(addr, size);
+			return;
+		}
+		
+		final RandomAccessFile backingFile = new RandomAccessFile(loc, "rw");
+		backingFile.setLength(size);
 
 		final FileChannel ch = backingFile.getChannel();
-		this.addr = (Long) mmap.invoke(ch, 1, 0L, this.size);
+		addr = (Long) mmap.invoke(ch, 1, 0L, size);
 
 		ch.close();
 		backingFile.close();
 	}
 
+	/**MMaps a file at the given location, creating the file if it does not
+	 * exist.  If the location is null, allocates memory in an anonymous
+	 * mapping not backed by any file.*/
 	public MMapper(final String loc, long len) throws Exception {
 		this.loc = loc;
 		this.size = roundTo4096(len);
@@ -92,7 +100,7 @@ public class MMapper implements Closeable{
 	//Callers should synchronize to avoid calls in the middle of this, but
 	//it is undesirable to synchronize w/ all access methods.
 	public void remap(long nLen) throws Exception{
-		unmmap.invoke(null, addr, this.size);
+		if(loc != null) unmmap.invoke(null, addr, this.size);
 		this.size = roundTo4096(nLen);
 		mapAndSetOffset();
 	}
@@ -104,7 +112,8 @@ public class MMapper implements Closeable{
 	@Override
 	public void close() throws IOException {
 		try {
-			unmmap.invoke(null, addr, this.size);
+			if(loc != null) unmmap.invoke(null, addr, size);
+			else deallocateDirect(addr);
 		} catch (Exception e){
 			throw new RuntimeException(e);
 		}
