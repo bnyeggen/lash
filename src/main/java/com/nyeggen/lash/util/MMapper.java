@@ -71,7 +71,12 @@ public class MMapper implements Closeable{
 	//for the given length and set this.addr to the returned offset
 	private void mapAndSetOffset() throws Exception{
 		if(loc == null){
-			addr = (addr == 0) ? allocateDirect(size) : reAllocateDirect(addr, size);
+			if(addr == 0){
+				addr = allocateDirect(size);
+				clear();
+			} else {
+				addr = reAllocateDirect(addr, size);
+			}
 			return;
 		}
 		
