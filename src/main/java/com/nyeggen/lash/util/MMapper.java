@@ -159,6 +159,16 @@ public class MMapper implements Closeable{
 		unsafe.setMemory(addr, size, (byte)0);
 	}
 	
+	public static long allocateDirect(long size){
+		return unsafe.allocateMemory(size);
+	}
+	public static void deallocateDirect(long addr){
+		unsafe.freeMemory(addr);
+	}
+	public static long reAllocateDirect(long addr, long size){
+		return unsafe.reallocateMemory(addr, size);
+	}
+	
 	/**After Java 7, this is a built-in.  We put it here so it's available
 	 * for testing.*/
 	public static File createTempDir() {
