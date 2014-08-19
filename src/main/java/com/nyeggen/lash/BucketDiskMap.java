@@ -1,6 +1,5 @@
 package com.nyeggen.lash;
 
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -18,7 +17,7 @@ import com.nyeggen.lash.util.MMapper;
  * into secondary.  If a bucket overflows, we chain to a second bucket of
  * pointers stored in secondary.*/
 public class BucketDiskMap extends ADiskMap {
-
+	
 	protected final static int bucketByteSize = 4096;
 	protected final static int bucketHeaderSize = 16;
 	protected final static int recordSize = 24;
@@ -333,11 +332,9 @@ public class BucketDiskMap extends ADiskMap {
 			@Override
 			public Entry<byte[], byte[]> next() {
 				if(! hasNext()) throw new NoSuchElementException();
-				final RecordPtr ptr = nextBucket.getPointer(nextSubIdx);
-				final byte[] k = ptr.getKey(secondaryMapper);
-				final byte[] v = ptr.getVal(secondaryMapper);
-				if(hasNext()) advance();
-				return new AbstractMap.SimpleImmutableEntry<byte[], byte[]>(k, v);
+				final BucketDiskMapEntry out = new BucketDiskMapEntry(nextBucket, nextSubIdx);
+				advance();
+				return out;
 			}
 			@Override
 			public void remove() {
@@ -346,6 +343,67 @@ public class BucketDiskMap extends ADiskMap {
 				BucketDiskMap.this.size.decrementAndGet();
 			}
 		};
+	}
+	
+	public class BucketDiskMapEntry implements Map.Entry<byte[], byte[]>{
+		byte[] k, v;
+		RecordPtr ptr;
+		final BucketView bucket;
+		final int subIdx;
+		
+		public BucketDiskMapEntry(BucketView bucket, int subIdx) {
+			this.bucket = bucket;
+			this.subIdx = subIdx;
+			ptr = bucket.getPointer(subIdx);
+			k = ptr.getKey(secondaryMapper);
+			v = ptr.getVal(secondaryMapper);
+		}
+		
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + Arrays.hashCode(k);
+			result = prime * result + Arrays.hashCode(v);
+			return result;
+		}
+
+		/**Requires same class, reference equality for enclosing map,
+		 * and the same k and v.*/
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj) return true;
+			if (obj == null) return false;
+			if (getClass() != obj.getClass()) return false;
+			final BucketDiskMapEntry other = (BucketDiskMapEntry) obj;
+			if (getOuterType() != other.getOuterType()) return false;
+			if (!Arrays.equals(k, other.k)) return false;
+			return Arrays.equals(v, other.v);
+		}
+
+		@Override
+		public byte[] getKey() { return k; }
+		@Override
+		public byte[] getValue() { return v; }
+		
+		@Override
+		public byte[] setValue(byte[] newValue) {
+			final byte[] out = v;
+			final long dataPtr;
+			if(newValue.length <= v.length){
+				secondaryMapper.putBytes(ptr.dataPtr + k.length, v);
+				dataPtr = ptr.dataPtr;
+			} else dataPtr = writeKeyVal(k, v);
+			
+			final RecordPtr nPtr = new RecordPtr(ptr.hash, dataPtr, k.length, newValue.length);
+			bucket.writeRecord(nPtr, subIdx);
+			ptr = nPtr;
+			v = newValue;
+			return out;
+		}
+		private BucketDiskMap getOuterType() {
+			return BucketDiskMap.this;
+		}
 	}
 	
 	/**Returns position between 0 and recordsPerBucket, based on top bits*/
