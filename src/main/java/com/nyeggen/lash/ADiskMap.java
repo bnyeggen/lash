@@ -55,7 +55,6 @@ public abstract class ADiskMap implements Closeable, IDiskMap {
 			primaryMapper = new MMapper(primaryLoc, primFileLen);
 			secondaryMapper = new MMapper(secondaryLoc, secFileLen);
 			readHeader();
-			primaryMapper.doubleLength();
 		} catch (Exception e){
 			throw new RuntimeException(e);
 		}
