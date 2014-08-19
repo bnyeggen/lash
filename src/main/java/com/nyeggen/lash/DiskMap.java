@@ -1,5 +1,7 @@
 package com.nyeggen.lash;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.AbstractCollection;
 import java.util.AbstractMap;
 import java.util.AbstractSet;
@@ -13,7 +15,7 @@ import com.nyeggen.lash.serde.Serde;
 
 
 @SuppressWarnings("unchecked")
-public class DiskMap<K,V> implements ConcurrentMap<K, V> {
+public class DiskMap<K,V> implements ConcurrentMap<K, V>, Closeable {
 	private final IDiskMap backingMap;
 	private final Serde<K> keySerde;
 	private final Serde<V> valSerde;
@@ -35,6 +37,11 @@ public class DiskMap<K,V> implements ConcurrentMap<K, V> {
 	@Override
 	public void clear() {
 		backingMap.clear();
+	}
+	
+	@Override
+	public void close() throws IOException{
+		backingMap.close();
 	}
 	
 	@Override

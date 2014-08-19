@@ -1,9 +1,10 @@
 package com.nyeggen.lash;
 
+import java.io.Closeable;
 import java.util.Iterator;
 import java.util.Map;
 
-public interface IDiskMap {
+public interface IDiskMap extends Closeable {
 	/**Returns the value corresponding to the given key, or null if it is not
 	 * present.  Zero-width values (ie, a hash set) are supported.*/
 	public byte[] get(byte[] k);
