@@ -267,8 +267,15 @@ public class BucketDiskMap extends ADiskMap {
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
 			if(sr.val != null){
-				//We could be optimistic and write this outside the lock.
-				final long dataPtr = writeKeyVal(k, v);
+				final long dataPtr;
+				if(v.length <= sr.val.length){
+					final BucketView bucket = sr.foundBucket;
+					final RecordPtr ptr = bucket.getPointer(sr.foundSubIdx);
+					secondaryMapper.putBytes(ptr.dataPtr + k.length, v);
+					dataPtr = ptr.dataPtr;
+				} else {
+					dataPtr = writeKeyVal(k, v);
+				}
 				final RecordPtr toWrite = new RecordPtr(hash, dataPtr, k.length, v.length);
 				sr.foundBucket.writeRecord(toWrite, sr.foundSubIdx);
 			}
@@ -282,8 +289,15 @@ public class BucketDiskMap extends ADiskMap {
 		synchronized(lockForHash(hash)){
 			final SearchResult sr = locateRecord(k, hash);
 			if(Arrays.equals(sr.val, prevVal)){
-				//We could be optimistic and write this outside the lock.
-				final long dataPtr = writeKeyVal(k, newVal);
+				final long dataPtr;
+				if(newVal.length <= prevVal.length){
+					final BucketView bucket = sr.foundBucket;
+					final RecordPtr ptr = bucket.getPointer(sr.foundSubIdx);
+					secondaryMapper.putBytes(ptr.dataPtr + k.length, newVal);
+					dataPtr = ptr.dataPtr;
+				} else {
+					dataPtr = writeKeyVal(k, newVal);
+				}
 				final RecordPtr toWrite = new RecordPtr(hash, dataPtr, k.length, newVal.length);
 				sr.foundBucket.writeRecord(toWrite, sr.foundSubIdx);
 				return true;
