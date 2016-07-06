@@ -24,4 +24,4 @@ This implementation groups pointers to variable-sized key/value pairs into "buck
 - Locks are also on a per-stripe basis, and enforce strict mututal exclusion (even for multiple readers).  Because we're using off-heap data structures, we can't depend on the tricks that eg ConcurrentHashMap uses to avoid blocking readers, and read/write locks are slower in a medium-contention scenario than synchronizing.
 
 We're not presently on Maven Central.  If you want to use lash, simply 
-`git clone https://github.com/fiatmoney/lash.git && cd lash && mvn install`.
+`git clone https://github.com/bnyeggen/lash.git && cd lash && mvn install`.
